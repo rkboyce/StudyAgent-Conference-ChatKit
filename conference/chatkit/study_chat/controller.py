@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib, json, secrets, sqlite3, time
+import hashlib, json, secrets, shutil, sqlite3, time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +16,8 @@ class Settings:
     acp_url: str; db_path: Path; artifact_root: Path; timeout: float = 45; session_ttl: int = 86400
 
 class Store:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, session_ttl: int):
+        self._ttl = session_ttl
         path.parent.mkdir(parents=True, exist_ok=True); self.db=sqlite3.connect(path, check_same_thread=False)
         self.db.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, state TEXT NOT NULL, expires INTEGER NOT NULL)"); self.db.commit()
     def create(self) -> dict[str, Any]:
@@ -30,7 +31,13 @@ class Store:
         state["workflow_history"].append({"at":int(time.time()),"stage":state["current_stage"]})
         self.db.execute("INSERT OR REPLACE INTO sessions VALUES(?,?,?)",(state["session_id"],json.dumps(state),int(time.time())+self.ttl)); self.db.commit()
     @property
-    def ttl(self): return 86400
+    def ttl(self): return self._ttl
+
+    def purge_expired(self) -> list[str]:
+        now=int(time.time())
+        rows=self.db.execute("SELECT id FROM sessions WHERE expires < ?",(now,)).fetchall()
+        self.db.execute("DELETE FROM sessions WHERE expires < ?",(now,)); self.db.commit()
+        return [row[0] for row in rows]
 
 class ACP:
     def __init__(self, settings: Settings): self.base=settings.acp_url.rstrip("/"); self.timeout=settings.timeout
@@ -42,14 +49,21 @@ class ACP:
         try: return response.json()
         except ValueError as e: raise WorkflowError("acp_non_json_response") from e
     async def get_trusted(self, relative_url: str) -> bytes:
-        url=httpx.URL(relative_url, base=httpx.URL(self.base + "/"))
+        url=httpx.URL(self.base + "/").join(relative_url)
         if url.host != httpx.URL(self.base).host or url.scheme != httpx.URL(self.base).scheme: raise WorkflowError("untrusted_review_url")
         async with httpx.AsyncClient(timeout=self.timeout) as client: response=await client.get(url)
         response.raise_for_status(); return response.content
 
 class Controller:
-    def __init__(self, settings: Settings): self.settings=settings; self.store=Store(settings.db_path); self.acp=ACP(settings); settings.artifact_root.mkdir(parents=True,exist_ok=True)
-    def create(self): return self.store.create()
+    def __init__(self, settings: Settings): self.settings=settings; self.store=Store(settings.db_path, settings.session_ttl); self.acp=ACP(settings); settings.artifact_root.mkdir(parents=True,exist_ok=True)
+    def purge_expired(self) -> int:
+        removed=self.store.purge_expired(); root=self.settings.artifact_root.resolve()
+        for sid in removed:
+            candidate=(root / sid).resolve()
+            if candidate.parent == root and candidate.is_dir(): shutil.rmtree(candidate)
+        return len(removed)
+    def create(self):
+        self.purge_expired(); return self.store.create()
     def state(self,sid): return self.store.get(sid)
     def _save(self,s): self.store.save(s); return s
     async def capture_intent(self,sid: str, study_intent: str, workflow_type="comparative"):
@@ -64,8 +78,14 @@ class Controller:
         result=await self.acp.post("phenotype_recommendation",{"study_intent":statement,"recommendation_role":role,"workflow_type":s["workflow_type"],"top_k":20,"max_results":10,"candidate_offset":offset})
         s["recommendation_results"][role]=result; s["active_role"]=role; return self._save(s)
     def select_phenotype(self,sid: str, role: str, phenotype: dict[str,Any]):
-        if not str(phenotype.get("phenotype_id") or phenotype.get("source_id") or "").strip(): raise WorkflowError("namespaced_source_id_required")
-        s=self.state(sid); s["selected_phenotypes"][role]=phenotype; s["active_role"]=role; s["current_stage"]="recommendations"; return self._save(s)
+        source_id=str(phenotype.get("source_id") or phenotype.get("phenotype_id") or "").strip(); provider=str(phenotype.get("source_provider") or phenotype.get("provider") or "").strip()
+        if not source_id or (":" not in source_id and not provider): raise WorkflowError("namespaced_source_id_required")
+        selected=dict(phenotype); selected["source_id"]=source_id if ":" in source_id else f"{provider}:{source_id}"
+        s=self.state(sid); s["selected_phenotypes"][role]=selected; s["active_role"]=role; s["current_stage"]="recommendations"
+        circe=selected.get("circe_json") or selected.get("circe")
+        if circe is not None:
+            root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True); (root/"circe.json").write_text(circe if isinstance(circe,str) else json.dumps(circe,indent=2)); s["generated_artifact_references"]["selected_circe"]="circe.json"
+        return self._save(s)
     async def request_scope(self,sid: str, narrative: str):
         s=self.state(sid); result=await self.acp.post("phenotype_make_computable",{"narrative_statement":narrative,"confirmed_scope":False,"scope_draft":True,"concept_review_mode":"required","candidate_limit":20,"concept_sets":[]}); s["make_computable"]={"narrative":narrative,"clarification":result}; s["current_stage"]="scope"; return self._save(s)
     async def confirm_scope(self,sid: str, scope: dict[str,Any], candidate_limit=20):
@@ -106,6 +126,11 @@ class Controller:
                 if value is not None: (root/name).write_text(value if isinstance(value,str) else json.dumps(value,indent=2))
             s["generated_artifact_references"]={"result":result,"capr":"capr.R","circe":"circe.json"}; s["current_stage"]="complete"
         return self._save(s)
+    async def contextual_guidance(self,sid: str, user_prompt: str):
+        s=self.state(sid)
+        step={"intent":"intent_split","recommendations":(str(s.get("active_role") or "target") + "_selection"),"scope":"phenotype_review","review":"phenotype_review","approved":"phenotype_review","complete":"workflow_summary"}.get(s["current_stage"],"phenotype_review")
+        result=await self.acp.post("workflow_context_dialogue",{"user_prompt":user_prompt,"study_intent":s.get("study_intent", ""),"workflow_type":s.get("workflow_type", ""),"current_step":step,"current_role":s.get("active_role") or "","current_context":{"confirmed_role_statements":s.get("confirmed_role_statements",{}),"selected_phenotypes":s.get("selected_phenotypes",{}),"current_stage":s.get("current_stage")}})
+        s["last_contextual_guidance"]=result; return self._save(s)
     async def improvement_advice(self,sid: str, phenotype: dict[str,Any]):
         s=self.state(sid); cohort=dict(phenotype); cohort.setdefault("name", cohort.get("phenotype_name") or cohort.get("source_id") or "Selected phenotype"); result=await self.acp.post("phenotype_improvements",{"protocol_text":s.get("study_intent") or "Phenotype improvement advisory request.","cohorts":[cohort],"characterization_previews":[]})
         s["improvement_advice"]={"advisory":True,"result":result,"atlas3":"https://atlas.napdi.org/Atlas3"}; return self._save(s)

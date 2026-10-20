@@ -22,14 +22,14 @@ cd conference/chatkit
 uv sync --extra test
 cp .env.example .env  # set OPENAI_API_KEY only when enabling ChatKit/Agents dialogue
 set -a; . ./.env; set +a
-uv run uvicorn study_chat.app:app --host 127.0.0.1 --port 8795
+uv run uvicorn study_chat.app:app --host 127.0.0.1 --port 8795 --root-path "$APP_BASE_PATH"
 ```
 
-Open `http://127.0.0.1:8795/study-chat/`. The current minimal frontend is deliberately small; the controller APIs are also the server-side integration point for the official custom ChatKit endpoint/widgets. OpenAI's current guidance recommends a self-hosted ChatKit server plus Agents SDK for new work, with a durable Store and server-side context. See [advanced ChatKit documentation](https://developers.openai.com/api/docs/guides/custom-chatkit).
+Open `http://127.0.0.1:8795/study-chat/`. The deterministic browser controls are available immediately. The self-hosted ChatKit backend is exposed at `POST /study-chat/chatkit`; it requires the opaque `X-Study-Session` header and persists threads in the same private SQLite service store. When `CHATKIT_DOMAIN_KEY` is configured, the browser embeds the ChatKit web component and sends only its opaque session ID to this backend; without that setting, the deterministic controls remain usable and no model call is made. OpenAI recommends a self-hosted ChatKit server plus Agents SDK with a durable Store and server-side context for new work. See [advanced ChatKit documentation](https://developers.openai.com/api/docs/guides/custom-chatkit).
 
 ## Deployment
 
-Install `uv` for the service user, then run `uv sync --no-dev` from `/opt/study-chat/conference/chatkit`. Create a protected `/etc/study-chat.env` (mode `0640`, owned by the service user) from `.env.example`; make `SESSION_DB` and `ARTIFACT_ROOT` persistent, private storage. Configure `STUDY_AGENT_URL=https://atlas.napdi.org/StudyAgent`, `APP_BASE_PATH=/study-chat`, and bind only `127.0.0.1:8795`.
+Install `uv` for the service user, then run `uv sync --no-dev` from `/opt/study-chat/conference/chatkit`. Create a protected `/etc/study-chat.env` (mode `0640`, owned by the service user) from `.env.example`; make `SESSION_DB` and `ARTIFACT_ROOT` persistent, private storage. `SESSION_TTL_HOURS` defaults to 24; on creating a session, expired session rows and only their matching private artifact directories are removed. Configure `STUDY_AGENT_URL=https://atlas.napdi.org/StudyAgent`, `APP_BASE_PATH=/study-chat`, and bind only `127.0.0.1:8795`.
 
 `/etc/systemd/system/study-chat.service`:
 
@@ -42,7 +42,7 @@ User=study-chat
 Group=study-chat
 WorkingDirectory=/opt/study-chat/conference/chatkit
 EnvironmentFile=/etc/study-chat.env
-ExecStart=/usr/local/bin/uv run --no-sync uvicorn study_chat.app:app --host ${APP_HOST} --port ${APP_PORT} --proxy-headers
+ExecStart=/usr/local/bin/uv run --no-sync uvicorn study_chat.app:app --host ${APP_HOST} --port ${APP_PORT} --proxy-headers --root-path ${APP_BASE_PATH}
 Restart=on-failure
 NoNewPrivileges=true
 PrivateTmp=true
@@ -56,8 +56,8 @@ Apache location example (do not apply directly in production):
 
 ```apache
 ProxyPreserveHost On
-ProxyPass        /study-chat/ http://127.0.0.1:8795/study-chat/ retry=0 timeout=60
-ProxyPassReverse /study-chat/ http://127.0.0.1:8795/study-chat/
+ProxyPass        /study-chat/ http://127.0.0.1:8795/ retry=0 timeout=60
+ProxyPassReverse /study-chat/ http://127.0.0.1:8795/
 RequestHeader set X-Forwarded-Proto "https"
 ProxyTimeout 60
 ```
