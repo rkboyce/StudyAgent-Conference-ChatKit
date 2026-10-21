@@ -351,7 +351,10 @@ document.querySelector("#guidance-return").onclick = () => {
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 };
-document.querySelector("#new").onclick = () => newSession().catch(error => notice(error.message, true));
+document.querySelector("#new").onclick = () => {
+  document.querySelector("#intent").value = "";
+  newSession().catch(error => notice(error.message, true));
+};
 document.querySelector("#start").onclick = async () => {
   try { if (!sid) await newSession(); setActiveTab("recommend"); render(await request(`/sessions/${sid}/intent`, { study_intent: document.querySelector("#intent").value.trim(), workflow_type: "comparative" })); }
   catch (error) { notice(error.message, true); }
