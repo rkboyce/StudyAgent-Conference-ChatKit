@@ -10,8 +10,9 @@ from .chatkit_server import ChatRequestContext, SQLiteChatKitStore, StudyChatKit
 
 ROOT=Path(__file__).resolve().parents[1]
 settings=Settings(os.getenv("STUDY_AGENT_URL","http://127.0.0.1:8765"),Path(os.getenv("SESSION_DB",ROOT/"var/study-chat.sqlite3")),Path(os.getenv("ARTIFACT_ROOT",ROOT/"var/artifacts")),float(os.getenv("ACP_TIMEOUT_SECONDS","45")),session_ttl=max(1,int(os.getenv("SESSION_TTL_HOURS","24")))*3600)
-controller=Controller(settings)
-chatkit_server=StudyChatKitServer(SQLiteChatKitStore(settings.db_path),controller,os.getenv("OPENAI_MODEL","gpt-4.1-mini"))
+chatkit_store=SQLiteChatKitStore(settings.db_path)
+controller=Controller(settings, on_expired=chatkit_store.purge_sessions)
+chatkit_server=StudyChatKitServer(chatkit_store,controller,os.getenv("OPENAI_MODEL","gpt-4.1-mini"))
 app=FastAPI(title="OHDSI Study Agent — Interactive Demonstration")
 app.mount("/assets", StaticFiles(directory=ROOT / "web"), name="assets")
 def fail(e): raise HTTPException(status_code=400,detail=str(e))

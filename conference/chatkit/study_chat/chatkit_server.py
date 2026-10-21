@@ -143,6 +143,14 @@ class SQLiteChatKitStore(Store[ChatRequestContext]):
         self.db.execute("DELETE FROM chat_attachments WHERE id=? AND session_id=?", (attachment_id, context.session_id))
         self.db.commit()
 
+    def purge_sessions(self, session_ids: list[str]) -> None:
+        if not session_ids: return
+        marks=",".join("?" for _ in session_ids)
+        self.db.execute(f"DELETE FROM chat_items WHERE thread_id IN (SELECT id FROM chat_threads WHERE session_id IN ({marks}))", session_ids)
+        self.db.execute(f"DELETE FROM chat_threads WHERE session_id IN ({marks})", session_ids)
+        self.db.execute(f"DELETE FROM chat_attachments WHERE session_id IN ({marks})", session_ids)
+        self.db.commit()
+
 
 def build_agent(controller: Controller, model: str) -> Agent[AgentContext[ChatRequestContext]]:
     @function_tool

@@ -15,6 +15,10 @@ This independently deployable FastAPI application places a review-gated browser 
 
 The controller vendors the deterministic policy rules from AgentPlayGround's `phenotype_review_csv_to_concept_sets.py` and its Atlas concept-set normalization rules. It intentionally rejects a full Circe cohort definition as an Atlas concept-set import. Current ACP accepts 1–500 candidates for deterministic `required` review; LLM `propose` is separately limited to 100. This app uses only `required` review. The prepared conference ACP also supports `scope_draft: true`; this app treats its result as advisory clarification and never promotes it to confirmed scope.
 
+## Revision semantics
+
+Confirming revised cohort statements invalidates all downstream selections, scope, frozen-review references, exact policies, approvals, and currently presented artifact references. Selecting a different phenotype for one role or starting a new make-computable narrative preserves selections for other roles, but invalidates the dependent scope/review/approval chain. Existing private files are not deleted by a revision; they are simply no longer presented as current artifacts. Expired controller sessions also remove their associated ChatKit threads and attachments when expiry cleanup next runs.
+
 ## Local development
 
 ```bash

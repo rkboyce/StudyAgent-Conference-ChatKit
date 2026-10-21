@@ -44,6 +44,21 @@ def test_question_to_role_selection_and_recommendation_is_persisted(tmp_path):
     assert (tmp_path / "artifacts" / state["session_id"] / "circe.json").exists()
 
 
+def test_revising_role_statements_invalidates_downstream_state(tmp_path):
+    c = controller(tmp_path)
+    state = c.create()
+    sid = state["session_id"]
+    state = c.confirm_roles(sid, {"target": "Naproxen exposure", "outcome": "Myocardial infarction"})
+    state = c.select_phenotype(sid, "target", {"phenotype_id": "ohdsi:44", "circe_json": {"ConceptSets": []}})
+    state.update(confirmed_scope={"index_event": "Naproxen"}, concept_review_id="review-old", exact_concept_policy={"policy_sha256": "old"}, approval_record={"policy_sha256": "old"})
+    c.store.save(state)
+    revised = c.confirm_roles(sid, {"target": "Ibuprofen exposure", "outcome": "Myocardial infarction"})
+    assert revised["selected_phenotypes"] == {}
+    assert revised["confirmed_scope"] is None
+    assert revised["concept_review_id"] is None
+    assert revised["approval_record"] is None
+
+
 def test_make_computable_requires_exact_policy_approval_before_emission(tmp_path):
     c = controller(tmp_path)
     state = c.create()
