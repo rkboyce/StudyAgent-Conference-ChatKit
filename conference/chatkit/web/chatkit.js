@@ -9,7 +9,7 @@ function message(text) {
 function updateGuidanceSummary() {
   const panel = document.querySelector("#chatkit-guidance");
   const summary = document.querySelector("#guidance-summary");
-  if (panel && summary) summary.textContent = panel.open ? "Click to hide conversational guidance" : "Expand for conversational guidance";
+  if (panel && summary) summary.textContent = panel.open ? "Click to hide /ohdsi - conversational guidance" : "Expand for /ohdsi - conversational guidance";
 }
 
 function setChatExpanded(expanded) {
@@ -53,6 +53,7 @@ async function mountChatKit(sessionId) {
 document.querySelector("#chatkit-guidance")?.addEventListener("toggle", updateGuidanceSummary);
 document.querySelector("#chatkit-expand")?.addEventListener("click", () => setChatExpanded(!document.querySelector("#chatkit")?.classList.contains("tall")));
 document.addEventListener("study-chat-open-guidance", () => { const panel = document.querySelector("#chatkit-guidance"); if (panel) { panel.open = true; updateGuidanceSummary(); } });
+document.addEventListener("study-chat-expand-guidance", () => setChatExpanded(true));
 updateGuidanceSummary();
 document.addEventListener("study-chat-session", event => mountChatKit(event.detail.sessionId).catch(() => message("Conversational guidance could not be initialized.")));
 mountChatKit(sessionStorage.getItem("studyChatSession") || "").catch(() => message("Conversational guidance could not be initialized."));

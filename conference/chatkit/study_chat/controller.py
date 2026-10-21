@@ -127,7 +127,7 @@ class Controller:
     async def recommend(self,sid: str, role: str, offset=0):
         s=self.state(sid); statement=s["confirmed_role_statements"].get(role)
         if not statement: raise WorkflowError("unknown_role")
-        result=await self.acp.post("phenotype_recommendation",{"study_intent":statement,"recommendation_role":role,"workflow_type":self._acp_workflow_type(s["workflow_type"]),"top_k":20,"max_results":5,"candidate_limit":5,"candidate_offset":offset})
+        result=await self.acp.post("phenotype_recommendation",{"study_intent":statement,"recommendation_role":role,"workflow_type":self._acp_workflow_type(s["workflow_type"]),"top_k":20,"max_results":3 if role == "target" else 5,"candidate_limit":5,"candidate_offset":offset})
         s["recommendation_results"][role]=result; s["active_role"]=role
         return self._save(s)
     def select_phenotype(self,sid: str, role: str, phenotype: dict[str,Any]):

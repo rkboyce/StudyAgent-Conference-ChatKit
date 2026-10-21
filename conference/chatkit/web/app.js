@@ -3,6 +3,7 @@ const api = `${base.replace(/\/$/, "")}/api`;
 let sid = sessionStorage.getItem("studyChatSession") || "";
 let activeTab = sessionStorage.getItem("studyChatTab") || "recommend";
 let pendingRequests = 0;
+let guidanceReturnTarget = null;
 
 function setBusy(active) {
   pendingRequests = Math.max(0, pendingRequests + (active ? 1 : -1));
@@ -29,9 +30,13 @@ function highlight(element) {
   element.classList.add("focus-highlight");
   setTimeout(() => element.classList.remove("focus-highlight"), 1500);
 }
-function openGuidance() {
+function openGuidance(returnTarget = document.activeElement) {
   const panel = document.querySelector("#chatkit-guidance");
+  guidanceReturnTarget = returnTarget;
+  const goBack = document.querySelector("#guidance-return");
+  if (goBack) goBack.hidden = !guidanceReturnTarget;
   document.dispatchEvent(new CustomEvent("study-chat-open-guidance"));
+  document.dispatchEvent(new CustomEvent("study-chat-expand-guidance"));
   highlight(panel);
   panel?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -44,6 +49,11 @@ const el = (tag, props = {}, children = []) => {
 const clear = node => node.replaceChildren();
 const json = value => JSON.stringify(value ?? {}, null, 2);
 const recommendationRows = result => result?.phenotype_recommendations || result?.recommendations?.phenotype_recommendations || result?.result?.phenotype_recommendations || [];
+function ohdsiHelpButton() {
+  const button = el("button", { className: "secondary ohdsi-help", textContent: "/o", title: "/ohdsi: ask a workflow question" });
+  button.onclick = () => openGuidance(button);
+  return button;
+}
 async function request(path, body, options = {}) {
   setBusy(true);
   try {
@@ -86,7 +96,7 @@ function roleFields(proposal) {
   const revise = el("button", { className: "secondary", textContent: "Revise study question" });
   revise.onclick = () => { const intent = document.querySelector("#intent"); intent.focus(); highlight(intent); intent.scrollIntoView({ behavior: "smooth", block: "center" }); notice("Edit the study question, then find existing phenotypes again. This will replace the proposed statements."); };
   const ask = el("button", { className: "secondary", textContent: "Ask about these suggestions" });
-  ask.onclick = openGuidance;
+  ask.onclick = event => openGuidance(event.currentTarget);
   section.append(button, revise, ask); return section;
 }
 async function beginRoleMakeComputable(state, role) {
@@ -99,9 +109,23 @@ async function beginRoleMakeComputable(state, role) {
     notice(`ACP returned the clarification checklist for the new ${role} phenotype.`);
   } catch (error) { notice(error.message, true); }
 }
+function recommendationDetails(candidate) {
+  const details = el("details");
+  details.append(el("summary", { textContent: "View recommendation details" }));
+  if (candidate.justification || candidate.description) details.append(el("p", { textContent: candidate.justification || candidate.description }));
+  for (const [label, value] of [
+    ["Recommendation summary", candidate.recommendation_summary || candidate.short_description],
+    ["Methodology", candidate.methodology_summary],
+    ["Source", candidate.source_dataset],
+    ["Source status", candidate.source_status],
+    ["Computability", candidate.computability_status],
+  ]) if (value) details.append(el("p", { textContent: `${label}: ${value}` }));
+  if (Array.isArray(candidate.signals) && candidate.signals.length) details.append(el("p", { textContent: `Signals: ${candidate.signals.join(", ")}` }));
+  return details;
+}
 function recommendations(state) {
   const section = el("section", { className: "card" });
-  section.append(el("h2", { textContent: "Find an existing phenotype" }));
+  section.append(el("h2", { textContent: "Find an existing phenotype" }), ohdsiHelpButton());
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
     button.onclick = async () => { try {
@@ -112,24 +136,24 @@ function recommendations(state) {
   }
   const active = state.active_role;
   const result = state.recommendation_results?.[active];
-  const rows = recommendationRows(result);
+  const rows = recommendationRows(result).slice(0, active === "target" ? 3 : undefined);
   if (rows.length) {
     section.append(el("h3", { textContent: `Recommendations for ${active}` }));
+    const noRelevant = el("button", { className: "secondary", textContent: "No relevant options" });
+    noRelevant.onclick = () => beginRoleMakeComputable(state, active);
+    section.append(el("p", { className: "hint", textContent: "Click this if no relevant results are returned." }), noRelevant);
     for (const candidate of rows) {
       const candidateBox = el("article", { className: "candidate" });
       candidateBox.append(el("strong", { textContent: candidate.phenotype_name || candidate.name || candidate.phenotype_id || "Phenotype" }));
-      candidateBox.append(el("p", { textContent: candidate.justification || candidate.description || "No ACP description supplied." }));
       candidateBox.append(el("code", { textContent: candidate.phenotype_id || candidate.source_id || "Source identifier unavailable" }));
       const select = el("button", { textContent: "Select this phenotype" });
       select.onclick = async () => { try { render(await request(`/sessions/${sid}/select`, { role: active, phenotype: candidate })); notice("Phenotype selected; its source identity was preserved."); } catch (error) { notice(error.message, true); } };
-      const create = el("button", { className: "secondary", textContent: `No — create a new ${active} phenotype` });
-      create.onclick = () => beginRoleMakeComputable(state, active);
-      candidateBox.append(select, create); section.append(candidateBox);
+      candidateBox.append(select, ohdsiHelpButton(), recommendationDetails(candidate)); section.append(candidateBox);
     }
   } else if (result && active) {
     const create = el("button", { textContent: `Create a new ${active} phenotype` });
     create.onclick = () => beginRoleMakeComputable(state, active);
-    section.append(el("p", { textContent: `No direct existing ${active} phenotype was returned for this statement.` }), create);
+    section.append(el("p", { textContent: `No direct existing ${active} phenotype was returned for this statement.` }), create, ohdsiHelpButton());
   }
   return section;
 }
@@ -173,13 +197,27 @@ function scopeDraftControls(draftResponse, narrative) {
   const draft = draftResponse?.scope_draft || {};
   const wrap = el("div", { className: "scope" });
   const errorBox = el("p", { id: "scope-form-error", className: "form-error", role: "alert" });
-  wrap.append(el("h3", { textContent: "Step 2: Review and confirm the phenotype scope" }));
-  wrap.append(el("p", { textContent: "These are advisory starting values. Review every decision below; submitting the form is the explicit scope confirmation." }));
+  const hasSuggestedValues = Boolean(draft.index_event || draft.domain || draft.entry_limit || draft.exit_strategy);
+  wrap.append(el("h3", { textContent: "Review and confirm the phenotype scope" }), ohdsiHelpButton());
+  wrap.append(el("p", { textContent: hasSuggestedValues ? "These are advisory starting values. Review every decision below; submitting the form is the explicit scope confirmation." : "AI needs additional clinical decisions before it can safely suggest scope values. Read the clarification below, refine the statement, or ask /ohdsi for help." }));
   if (draft.rationale) wrap.append(el("p", { textContent: draft.rationale }));
   const questions = Array.isArray(draftResponse?.questions) ? draftResponse.questions : [];
   if (questions.length) wrap.append(el("p", { textContent: questions.join(" ") }));
   const warnings = Array.isArray(draft.warnings) ? draft.warnings : [];
   if (warnings.length) wrap.append(el("ul", {}, warnings.map(warning => el("li", { textContent: warning }))));
+  const refreshSuggestions = el("button", { className: "secondary", textContent: "Get / refresh AI scope suggestions" });
+  refreshSuggestions.onclick = async () => {
+    try {
+      notice("Requesting advisory AI scope suggestions…");
+      const next = await request(`/sessions/${sid}/make-computable`, { narrative });
+      const nextDraft = next.make_computable?.clarification?.scope_draft || {};
+      render(next);
+      notice(nextDraft.index_event || nextDraft.domain || nextDraft.entry_limit || nextDraft.exit_strategy
+        ? "ACP returned advisory AI scope suggestions. Review each value before confirmation."
+        : "ACP needs additional clinical clarification before it can safely suggest scope values. Review the explanation above or ask /ohdsi.");
+    } catch (error) { notice(error.message, true); }
+  };
+  wrap.append(refreshSuggestions);
   const indexEvent = el("input", { id: "scope-index-event", value: draft.index_event || "", placeholder: "Plain-language index event" });
   const priorObservation = el("input", { id: "scope-prior-observation", type: "number", min: "0", value: draft.prior_observation_days ?? "", placeholder: "Days" });
   const domain = optionSelect("scope-domain", "OMOP event domain", [["Condition", "Condition"], ["Drug", "Drug"], ["Procedure", "Procedure"], ["Measurement", "Measurement"], ["Observation", "Observation"], ["Visit", "Visit"], ["Device", "Device"]], draft.domain);
@@ -190,11 +228,6 @@ function scopeDraftControls(draftResponse, narrative) {
   const visitOverlap = optionSelect("scope-visit-overlap", "Visit-overlap requirement", [["false", "No visit-overlap requirement"], ["true", "Require overlap with a visit"]]);
   const fields = [indexEvent, domain.input, entryLimit.input, priorObservation, boundary.input, windows.input, exit.input, visitOverlap.input];
   wrap.append(el("label", { textContent: "Plain-language index event" }, [indexEvent]), domain.label, entryLimit.label, el("label", { textContent: "Required prior observation (days)" }, [priorObservation]), boundary.label, windows.label, exit.label, visitOverlap.label, errorBox);
-  const refreshSuggestions = el("button", { className: "secondary", textContent: "Get / refresh AI scope suggestions" });
-  refreshSuggestions.onclick = async () => {
-    try { notice("Requesting advisory AI scope suggestions…"); render(await request(`/sessions/${sid}/make-computable`, { narrative })); notice("ACP returned advisory AI scope suggestions. Review each value before confirmation."); }
-    catch (error) { notice(error.message, true); }
-  };
   const confirm = el("button", { textContent: "Confirm this exact scope and retrieve candidates" });
   confirm.onclick = async () => {
     const missing = fields.filter(input => input.value === "" || input.value === null);
@@ -212,20 +245,26 @@ function scopeDraftControls(draftResponse, narrative) {
     try { render(await request(`/sessions/${sid}/scope`, { scope, candidate_limit: 20 })); notice("Scope submitted as an explicit confirmation."); }
     catch (error) { notice(`Scope was not submitted: ${error.message}`, true); }
   };
-  wrap.append(refreshSuggestions, confirm);
+  wrap.append(confirm);
   wrap.append(el("details", {}, [el("summary", { textContent: "View raw ACP advisory response" }), el("pre", { textContent: json(draftResponse) })]));
   return wrap;
 }
 function computableWorkflow(state) {
   const section = el("section", { className: "card" });
-  section.append(el("h2", { textContent: "Create a new computable phenotype" }));
-  section.append(el("p", { textContent: "Use this when no existing phenotype is suitable. It begins with a reviewable scope checklist; it does not create artifacts until later concept-policy approval." }));
-  const narrative = el("textarea", { id: "narrative", value: state.make_computable?.narrative || "", placeholder: "Describe the phenotype in plain clinical language." });
-  const clarify = el("button", { textContent: "Start scope checklist" });
-  clarify.onclick = async () => { try { await ensureSession(); setActiveTab("computable"); notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
-  section.append(narrative, clarify);
+  section.append(el("h2", { textContent: "Create a new computable phenotype" }), ohdsiHelpButton());
   const draft = state.make_computable?.clarification;
-  if (draft && state.current_stage === "scope") section.append(scopeDraftControls(draft, state.make_computable?.narrative || ""));
+  const scopeStarted = Boolean(draft && state.current_stage === "scope");
+  if (scopeStarted) {
+    section.append(el("p", { textContent: "A scope statement has been started for this new phenotype. Complete and confirm every decision below before concept candidates can be retrieved." }));
+    section.append(el("p", { className: "hint", textContent: `Statement: ${state.make_computable?.narrative || "Not available"}` }));
+    section.append(scopeDraftControls(draft, state.make_computable?.narrative || ""));
+  } else {
+    section.append(el("p", { textContent: "Use this when no existing phenotype is suitable. It begins with a reviewable scope checklist; it does not create artifacts until later concept-policy approval." }));
+    const narrative = el("textarea", { id: "narrative", value: state.make_computable?.narrative || "", placeholder: "Describe the phenotype in plain clinical language." });
+    const clarify = el("button", { textContent: "Start scope checklist" });
+    clarify.onclick = async () => { try { await ensureSession(); setActiveTab("computable"); notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
+    section.append(narrative, clarify);
+  }
   if (["review", "approved"].includes(state.current_stage)) section.append(reviewControls(state));
   return section;
 }
@@ -298,6 +337,15 @@ async function newSession() {
   document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } }));
   render(state); notice("New private session created.");
 }
+document.querySelector("#guidance-return").onclick = () => {
+  const target = guidanceReturnTarget;
+  guidanceReturnTarget = null;
+  document.querySelector("#guidance-return").hidden = true;
+  if (target?.isConnected) {
+    target.focus(); highlight(target);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+};
 document.querySelector("#new").onclick = () => newSession().catch(error => notice(error.message, true));
 document.querySelector("#start").onclick = async () => {
   try { if (!sid) await newSession(); setActiveTab("recommend"); render(await request(`/sessions/${sid}/intent`, { study_intent: document.querySelector("#intent").value.trim(), workflow_type: "comparative" })); }

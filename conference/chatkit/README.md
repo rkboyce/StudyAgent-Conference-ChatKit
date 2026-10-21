@@ -27,12 +27,15 @@ The collapsible ChatKit panel is guidance-only. For substantive questions it cal
 
 ## Demonstration interface
 
-The browser presents two workflow tabs: **Find existing phenotypes** and **Create computable phenotype**. A participant can move between them without changing any confirmed workflow state. Role statements remain editable before confirmation; the interface also offers an explicit return to the original study question and a guidance-panel shortcut. Candidate cards pair selection with the role-specific path to create a new phenotype.
+The browser presents two workflow tabs: **Find existing phenotypes** and **Create computable phenotype**. A participant can move between them without changing any confirmed workflow state. Role statements remain editable before confirmation; the interface also offers an explicit return to the original study question and a guidance-panel shortcut. Target recommendations are limited to three choices; recommendation rationale and metadata are initially hidden in each card's **View recommendation details** disclosure. One **No relevant options** action starts the role-specific make-computable path.
 
+When that path begins from a recommendation, the scope statement is already started and the participant is told to complete it before candidate concepts can be retrieved. If ACP returns clarification rather than draft values—for example, because a statement describes an exposure-to-outcome sequence—the UI shows that safety boundary and ACP's questions/warnings instead of implying that refresh made no change. **Get / refresh AI scope suggestions** appears immediately before the plain-language index event.
+
+The collapsed **/ohdsi - conversational guidance** panel can be opened from compact **/o** controls beside workflow decisions. It opens and expands the conversation, then offers a return to the prior workflow control while retaining the expanded conversation.
 
 Review-package URLs returned by ACP are resolved beneath the configured trusted ACP origin and path prefix. For example, a server configured at `https://atlas.napdi.org/StudyAgent` resolves ACP's `/flows/...` review links beneath `/StudyAgent/flows/...`; unavailable or expired packages return a controlled workflow error rather than an application exception.
 
-The ChatKit panel is collapsed initially and uses a compact 300px conversation area. A participant can explicitly expand it to 560px; messages within the chat surface scroll at that bounded size. Application operation messages remain in a fixed bottom tray, and incomplete scope fields are highlighted, focused, and described inline. Freezing a concept-review session exposes both the private frozen CSV and manifest for download before a reviewed CSV can be uploaded.
+The ChatKit panel is collapsed initially and uses a compact bounded conversation area. A participant can explicitly expand it for longer exchanges; messages within the chat surface scroll at that bounded size. Application operation messages remain in a fixed bottom tray, and incomplete scope fields are highlighted, focused, and described inline. Freezing a concept-review session exposes both the private frozen CSV and manifest for download before a reviewed CSV can be uploaded.
 
 ## Revision semantics
 
