@@ -110,3 +110,23 @@ def test_review_urls_keep_the_configured_acp_path_prefix(tmp_path):
     assert str(acp.resolve_trusted_url("/flows/phenotype_make_computable/reviews/a/candidates.csv")) == "https://atlas.napdi.org/StudyAgent/flows/phenotype_make_computable/reviews/a/candidates.csv"
     with pytest.raises(WorkflowError, match="untrusted_review_url"):
         acp.resolve_trusted_url("https://example.test/flows/phenotype_make_computable/reviews/a/candidates.csv")
+
+
+def test_freezing_empty_review_package_records_atlas_handoff(tmp_path):
+    c = controller(tmp_path)
+    state = c.create()
+    sid = state["session_id"]
+    state["concept_review_id"] = "review-empty"
+    state["make_computable"] = {"review": {"review_urls": {"candidates_csv": "/flows/phenotype_make_computable/reviews/review-empty/candidates.csv", "manifest": "/flows/phenotype_make_computable/reviews/review-empty/manifest"}}}
+    c.store.save(state)
+
+    async def empty_package(url):
+        if str(url).endswith("candidates.csv"):
+            return b"concept_set_name,concept_id,domain\n"
+        return json.dumps({"schema_version": 1, "review_id": "review-empty", "eligible_candidate_keys": []}).encode()
+
+    c.acp.get_trusted = empty_package
+    frozen = asyncio.run(c.freeze_review_package(sid))
+    refs = frozen["review_artifact_references"]
+    assert refs["candidate_count"] == 0
+    assert refs["no_vocabulary_candidates"] is True

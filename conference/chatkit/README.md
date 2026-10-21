@@ -35,7 +35,7 @@ The collapsed **/ohdsi - conversational guidance** panel can be opened from comp
 
 Review-package URLs returned by ACP are resolved beneath the configured trusted ACP origin and path prefix. For example, a server configured at `https://atlas.napdi.org/StudyAgent` resolves ACP's `/flows/...` review links beneath `/StudyAgent/flows/...`; unavailable or expired packages return a controlled workflow error rather than an application exception.
 
-The ChatKit panel is collapsed initially and uses a compact bounded conversation area. A participant can explicitly expand it for longer exchanges; messages within the chat surface scroll at that bounded size. Application operation messages remain in a fixed bottom tray, and incomplete scope fields are highlighted, focused, and described inline. Freezing a concept-review session exposes both the private frozen CSV and manifest for download before a reviewed CSV can be uploaded.
+The ChatKit panel is collapsed initially and uses a compact bounded conversation area. A participant can explicitly expand it for longer exchanges; messages within the chat surface scroll at that bounded size. Application operation messages remain in a fixed bottom tray, and incomplete scope fields are highlighted, focused, and described inline. Freezing a concept-review session exposes both the private frozen CSV and manifest for download before a reviewed CSV can be uploaded. If that package has no candidate concepts, the controller records the empty result and the UI directs the participant to build the concept set in [Atlas3](https://atlas.napdi.org/Atlas3), rather than offering an unusable policy-upload path.
 
 ## Revision semantics
 

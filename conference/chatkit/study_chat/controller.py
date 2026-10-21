@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib, json, secrets, shutil, sqlite3, time
+import csv as csv_module, hashlib, io, json, secrets, shutil, sqlite3, time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -176,8 +176,12 @@ class Controller:
         try: manifest_json=json.loads(manifest)
         except ValueError as e: raise WorkflowError("invalid_review_manifest") from e
         if manifest_json.get("review_id") != s["concept_review_id"]: raise WorkflowError("review_manifest_mismatch")
+        candidate_rows = list(csv_module.DictReader(io.StringIO(csv.decode("utf-8-sig", errors="replace"))))
+        candidate_count = sum(1 for row in candidate_rows if any(str(value or "").strip() for value in row.values()))
+        eligible_keys = manifest_json.get("eligible_candidate_keys")
+        no_vocabulary_candidates = candidate_count == 0 or (isinstance(eligible_keys, list) and not eligible_keys)
         root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True); (root/"review.csv").write_bytes(csv); (root/"manifest.json").write_bytes(manifest)
-        s["review_artifact_references"]={"csv":"review.csv","manifest":"manifest.json","review_id":s["concept_review_id"]}; return self._save(s)
+        s["review_artifact_references"]={"csv":"review.csv","manifest":"manifest.json","review_id":s["concept_review_id"],"candidate_count":candidate_count,"no_vocabulary_candidates":no_vocabulary_candidates}; return self._save(s)
     def ingest_review_csv(self,sid: str, csv_bytes: bytes):
         if len(csv_bytes)>5*1024*1024: raise WorkflowError("review_upload_too_large")
         s=self.state(sid); root=self.settings.artifact_root/sid; manifest_path=root/"manifest.json"

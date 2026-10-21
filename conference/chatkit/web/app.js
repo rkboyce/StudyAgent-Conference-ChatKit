@@ -283,15 +283,19 @@ function reviewControls(state) {
   const refs = state.review_artifact_references || {};
   if (refs.csv && refs.manifest) {
     wrap.append(el("p", { textContent: "Frozen package ready:" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${refs.csv}`, textContent: "Download frozen review CSV" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${refs.manifest}`, textContent: "Download review manifest" }));
-    const upload = el("input", { type: "file", accept: ".csv" });
-    upload.onchange = async () => {
-      if (!upload.files?.[0]) return;
-      const data = new FormData(); data.append("file", upload.files[0]);
-      try { render(await request(`/sessions/${sid}/review/upload`, data)); notice("CSV policy validated. Review the exact digest below."); } catch (error) { notice(error.message, true); }
-    };
-    wrap.append(el("label", { textContent: "Upload reviewed CSV" }, [upload]));
+    if (refs.no_vocabulary_candidates) {
+      wrap.append(el("p", { className: "notice error", textContent: "No concept candidates were available in the frozen review CSV/manifest. The current vocabulary search cannot build this concept set from the requested index-event expression; this can occur with a disjunction of clinical terms." }), el("p", { textContent: "Continue concept-set development in Atlas3, then return here with the reviewed definition when available." }), el("a", { href: "https://atlas.napdi.org/Atlas3", target: "_blank", rel: "noopener noreferrer", textContent: "Open Atlas3 concept sets" }), ohdsiHelpButton());
+    } else {
+      const upload = el("input", { type: "file", accept: ".csv" });
+      upload.onchange = async () => {
+        if (!upload.files?.[0]) return;
+        const data = new FormData(); data.append("file", upload.files[0]);
+        try { render(await request(`/sessions/${sid}/review/upload`, data)); notice("CSV policy validated. Review the exact digest below."); } catch (error) { notice(error.message, true); }
+      };
+      wrap.append(el("label", { textContent: "Upload reviewed CSV" }, [upload]));
+    }
   }
-  const policy = state.exact_concept_policy;
+  const policy = refs.no_vocabulary_candidates ? null : state.exact_concept_policy;
   if (policy?.policy_sha256) {
     wrap.append(el("pre", { textContent: json(policy) }));
     const approve = el("button", { textContent: "Approve this exact policy digest" });
@@ -337,7 +341,7 @@ async function newSession() {
   document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } }));
   render(state); notice("New private session created.");
 }
-document.querySelector("#guidance-shortcut").onclick = event => openGuidance(event.currentTarget);
+document.querySelector("#guidance-shortcut").onclick = event => { event.preventDefault(); event.stopPropagation(); openGuidance(event.currentTarget); };
 document.querySelector("#guidance-return").onclick = () => {
   const target = guidanceReturnTarget;
   guidanceReturnTarget = null;
