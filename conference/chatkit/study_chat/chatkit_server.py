@@ -160,18 +160,25 @@ def build_agent(controller: Controller, model: str) -> Agent[AgentContext[ChatRe
         safe = {key: state.get(key) for key in ("workflow_type", "study_intent", "confirmed_role_statements", "active_role", "current_stage", "selected_phenotypes", "confirmed_scope", "approval_record", "generated_artifact_references")}
         return json.dumps(safe, sort_keys=True)
 
+    @function_tool
+    async def workflow_context_guidance(ctx: RunContextWrapper[AgentContext[ChatRequestContext]], question: str) -> str:
+        """Return ACP-grounded, read-only guidance for the participant's current workflow stage."""
+        result = await controller.contextual_guidance(ctx.context.request_context.session_id, question)
+        return json.dumps(result.get("dialogue") or result, sort_keys=True)
+
     return Agent[AgentContext[ChatRequestContext]](
         name="OHDSI Study Agent",
         model=model,
         instructions=(
             "You are a conference demonstration guide for OHDSI study design. "
             "Use current_workflow_state before describing what has been decided. "
+            "For every substantive workflow question, call workflow_context_guidance before answering and explain only its grounded guidance plus the confirmed state. "
             "Never infer or claim clinical approval, do not select a phenotype, confirm scope, approve concepts, emit artifacts, edit Atlas, or apply phenotype improvements. "
             "Those actions are explicitly performed through server-validated controls. "
             "Explain that no patient-level data or PHI may be entered. "
             "Phenotype improvement suggestions are advisory only and must be applied manually in Atlas3."
         ),
-        tools=[current_workflow_state],
+        tools=[current_workflow_state, workflow_context_guidance],
     )
 
 

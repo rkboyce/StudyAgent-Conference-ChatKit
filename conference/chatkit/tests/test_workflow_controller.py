@@ -16,6 +16,8 @@ class FakeACP:
             return {"status": "ok", "intent_split": {"target_statement": "Naproxen exposure", "outcome_statement": "Myocardial infarction"}}
         if flow == "phenotype_recommendation":
             return {"status": "ok", "phenotype_recommendations": [{"phenotype_id": "ohdsi:44", "phenotype_name": "Myocardial infarction", "circe_json": {"ConceptSets": []}}]}
+        if flow == "phenotype_definition":
+            return {"status": "ok", "phenotype_id": payload["phenotype_id"], "circe_json": {"ConceptSets": []}, "conversion": {"performed": False, "capr_code": None}}
         if flow == "phenotype_make_computable" and not payload["confirmed_scope"]:
             return {"status": "needs_clarification", "scope_draft": {"index_event": "Acute kidney injury"}}
         if flow == "phenotype_make_computable" and payload["concept_review_mode"] == "required":
@@ -42,6 +44,9 @@ def test_question_to_role_selection_and_recommendation_is_persisted(tmp_path):
     state = c.select_phenotype(state["session_id"], "outcome", state["recommendation_results"]["outcome"]["phenotype_recommendations"][0])
     assert state["selected_phenotypes"]["outcome"]["source_id"] == "ohdsi:44"
     assert (tmp_path / "artifacts" / state["session_id"] / "circe.json").exists()
+    state = asyncio.run(c.retrieve_selected_definition(state["session_id"], "outcome"))
+    assert state["generated_artifact_references"]["selected_circe_outcome"] == "selected_outcome_circe.json"
+    assert (tmp_path / "artifacts" / state["session_id"] / "selected_outcome_circe.json").exists()
 
 
 def test_revising_role_statements_invalidates_downstream_state(tmp_path):

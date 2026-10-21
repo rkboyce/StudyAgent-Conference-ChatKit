@@ -1,6 +1,12 @@
 const base = document.querySelector("meta[name=study-chat-base]")?.content || "/study-chat";
 const api = `${base.replace(/\/$/, "")}/api`;
 let sid = sessionStorage.getItem("studyChatSession") || "";
+let pendingRequests = 0;
+function setBusy(active) {
+  pendingRequests += active ? 1 : -1;
+  const activity = document.querySelector("#activity");
+  if (activity) activity.hidden = pendingRequests <= 0;
+}
 
 const el = (tag, props = {}, children = []) => {
   const node = document.createElement(tag);
@@ -12,19 +18,24 @@ const clear = node => node.replaceChildren();
 const json = value => JSON.stringify(value ?? {}, null, 2);
 const recommendationRows = result => result?.phenotype_recommendations || result?.recommendations?.phenotype_recommendations || result?.result?.phenotype_recommendations || [];
 async function request(path, body, options = {}) {
-  const response = await fetch(`${api}${path}`, {
-    method: options.method || "POST",
-    headers: body instanceof FormData ? {} : { "content-type": "application/json" },
-    body: body === undefined ? undefined : (body instanceof FormData ? body : JSON.stringify(body)),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.detail || "The request could not be completed.");
-  return payload;
+  setBusy(true);
+  try {
+    const response = await fetch(`${api}${path}`, {
+      method: options.method || "POST",
+      headers: body instanceof FormData ? {} : { "content-type": "application/json" },
+      body: body === undefined ? undefined : (body instanceof FormData ? body : JSON.stringify(body)),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || "The request could not be completed.");
+    return payload;
+  } finally { setBusy(false); }
 }
 function notice(message, error = false) {
   const box = document.querySelector("#notice");
   box.textContent = message;
   box.className = error ? "notice error" : "notice";
+  const activity = document.querySelector("#activity span:last-child");
+  if (activity && pendingRequests) activity.textContent = message;
 }
 function roleFields(proposal) {
   const split = proposal?.intent_split || proposal || {};
@@ -79,6 +90,35 @@ function recommendations(state) {
       select.onclick = async () => { try { render(await request(`/sessions/${sid}/select`, { role: active, phenotype: candidate })); notice("Phenotype selected; its source identity was preserved."); } catch (error) { notice(error.message, true); } };
       candidateBox.append(select); section.append(candidateBox);
     }
+  }
+  return section;
+}
+function selectedPhenotypes(state) {
+  const entries = Object.entries(state.selected_phenotypes || {});
+  if (!entries.length) return null;
+  const section = el("section", { className: "card" });
+  section.append(el("h2", { textContent: "Selected phenotypes" }));
+  for (const [role, phenotype] of entries) {
+    const box = el("article", { className: "candidate" });
+    box.append(el("strong", { textContent: `${role[0].toUpperCase() + role.slice(1)}: ${phenotype.phenotype_name || phenotype.name || phenotype.source_id}` }));
+    box.append(el("code", { textContent: phenotype.source_id }));
+    box.append(el("p", { textContent: `Computability: ${phenotype.computability_status || "not yet checked"}. Selection is recorded for this demonstration; it is not clinical approval.` }));
+    const result = phenotype.definition_result;
+    if (!result) {
+      const inspect = el("button", { textContent: "Check available Capr/Circe artifacts" });
+      inspect.onclick = async () => { try { notice(`Checking available artifacts for the selected ${role} phenotype…`); render(await request(`/sessions/${sid}/selected-definition/${encodeURIComponent(role)}`)); notice("Artifact availability was checked without creating or converting a phenotype."); } catch (error) { notice(error.message, true); } };
+      box.append(inspect);
+    } else if (result.status === "ok" && result.circe_json !== undefined) {
+      const circe = state.generated_artifact_references?.[`selected_circe_${role}`];
+      const capr = state.generated_artifact_references?.[`selected_capr_${role}`];
+      box.append(el("p", { textContent: "ACP returned an existing executable definition. Review it before any use." }));
+      if (circe) box.append(el("a", { href: `${api}/sessions/${sid}/artifacts/${circe}?inline=true`, target: "_blank", textContent: "View Circe JSON" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${circe}`, textContent: "Download Circe JSON" }));
+      if (capr) box.append(el("a", { href: `${api}/sessions/${sid}/artifacts/${capr}?inline=true`, target: "_blank", textContent: "View Capr R" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${capr}`, textContent: "Download Capr R" }));
+    } else {
+      box.append(el("p", { textContent: "ACP did not return an existing executable artifact for this selection. You may use the create-new-phenotype path; no conversion was started automatically." }));
+      box.append(el("details", {}, [el("summary", { textContent: "Artifact-check details" }), el("pre", { textContent: json(result) })]));
+    }
+    section.append(box);
   }
   return section;
 }
@@ -146,6 +186,7 @@ function render(state) {
   document.querySelector("#stage").textContent = state.current_stage || "Start with a research question";
   if (state.intent_proposal && !Object.keys(state.confirmed_role_statements || {}).length) content.append(roleFields(state.intent_proposal));
   if (Object.keys(state.confirmed_role_statements || {}).length) content.append(recommendations(state));
+  const selected = selectedPhenotypes(state); if (selected) content.append(selected);
   content.append(computableWorkflow(state));
   const output = artifacts(state); if (output) content.append(output);
   content.append(el("details", {}, [el("summary", { textContent: "Session details" }), el("pre", { textContent: json(state) })]));

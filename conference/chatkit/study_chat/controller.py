@@ -118,6 +118,19 @@ class Controller:
         if circe is not None:
             root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True); (root/"circe.json").write_text(circe if isinstance(circe,str) else json.dumps(circe,indent=2)); s["generated_artifact_references"]["selected_circe"]="circe.json"
         return self._save(s)
+    async def retrieve_selected_definition(self,sid: str,role: str):
+        s=self.state(sid); selected=s.get("selected_phenotypes",{}).get(role)
+        if not selected: raise WorkflowError("selected_phenotype_required")
+        result=await self.acp.post("phenotype_definition",{"phenotype_id":selected["source_id"],"allow_make_computable":False,"recommendation_context":{"recommendation_role":role,"workflow_type":s.get("workflow_type","")}})
+        selected["definition_result"]=result
+        if result.get("status")=="ok" and result.get("circe_json") is not None:
+            root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True)
+            circe_name=f"selected_{role}_circe.json"; (root/circe_name).write_text(result["circe_json"] if isinstance(result["circe_json"],str) else json.dumps(result["circe_json"],indent=2))
+            s["generated_artifact_references"][f"selected_circe_{role}"]=circe_name
+            capr=(result.get("conversion") or {}).get("capr_code")
+            if capr:
+                capr_name=f"selected_{role}_capr.R"; (root/capr_name).write_text(capr); s["generated_artifact_references"][f"selected_capr_{role}"]=capr_name
+        return self._save(s)
     async def request_scope(self,sid: str,narrative: str,role: str=""):
         s=self.state(sid)
         if role:

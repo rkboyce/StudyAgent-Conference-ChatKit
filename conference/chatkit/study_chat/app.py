@@ -48,6 +48,8 @@ async def roles(sid:str,body:Roles): return controller.confirm_roles(sid,body.st
 async def recommend(sid:str,role:str): return await controller.recommend(sid,role)
 @app.post("/api/sessions/{sid}/select")
 async def select(sid:str,body:Select): return controller.select_phenotype(sid,body.role,body.phenotype)
+@app.post("/api/sessions/{sid}/selected-definition/{role}")
+async def selected_definition(sid:str,role:str): return await controller.retrieve_selected_definition(sid,role)
 @app.post("/api/sessions/{sid}/make-computable")
 async def clarify(sid:str,body:dict): return await controller.request_scope(sid,str(body.get("narrative","")),str(body.get("role", "")))
 @app.post("/api/sessions/{sid}/scope")
@@ -70,9 +72,10 @@ async def improvement_advice(sid:str,body:dict):
     if not isinstance(phenotype,dict) or not phenotype: raise HTTPException(422,"phenotype object is required")
     return await controller.improvement_advice(sid,phenotype)
 @app.get("/api/sessions/{sid}/artifacts/{name}")
-async def artifact(sid:str,name:str):
-    if name not in {"capr.R","circe.json","review.csv","manifest.json","approval.json"}: raise HTTPException(404)
+async def artifact(sid:str,name:str,inline:bool=False):
+    if name not in {"capr.R","circe.json","review.csv","manifest.json","approval.json","selected_target_circe.json","selected_comparator_circe.json","selected_outcome_circe.json","selected_target_capr.R","selected_comparator_capr.R","selected_outcome_capr.R"}: raise HTTPException(404)
     controller.state(sid)
     path=settings.artifact_root/sid/name
     if not path.exists(): raise HTTPException(404)
-    return FileResponse(path,filename=name)
+    media_type="application/json" if name.endswith(".json") else "text/plain"
+    return FileResponse(path,media_type=media_type,filename=None if inline else name)
