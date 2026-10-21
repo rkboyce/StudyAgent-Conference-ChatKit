@@ -1,13 +1,29 @@
 const base = document.querySelector("meta[name=study-chat-base]")?.content || "/study-chat";
 const api = `${base.replace(/\/$/, "")}/api`;
 let sid = sessionStorage.getItem("studyChatSession") || "";
+let activeTab = sessionStorage.getItem("studyChatTab") || "recommend";
 let pendingRequests = 0;
-function setBusy(active) {
-  pendingRequests += active ? 1 : -1;
-  const activity = document.querySelector("#activity");
-  if (activity) activity.hidden = pendingRequests <= 0;
-}
 
+function setBusy(active) {
+  pendingRequests = Math.max(0, pendingRequests + (active ? 1 : -1));
+  const activity = document.querySelector("#activity");
+  if (activity) activity.hidden = pendingRequests === 0;
+}
+function setActiveTab(tab) {
+  activeTab = tab;
+  sessionStorage.setItem("studyChatTab", tab);
+  for (const button of document.querySelectorAll("[data-workflow-tab]")) {
+    const selected = button.dataset.workflowTab === tab;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  document.querySelector("#existing-pane")?.toggleAttribute("hidden", tab !== "recommend");
+  document.querySelector("#computable-pane")?.toggleAttribute("hidden", tab !== "computable");
+}
+function openGuidance() {
+  document.dispatchEvent(new CustomEvent("study-chat-open-guidance"));
+  document.querySelector("#chatkit-guidance")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 const el = (tag, props = {}, children = []) => {
   const node = document.createElement(tag);
   Object.assign(node, props);
@@ -37,13 +53,12 @@ function notice(message, error = false) {
   const activity = document.querySelector("#activity span:last-child");
   if (activity && pendingRequests) activity.textContent = message;
 }
+async function ensureSession() {
+  if (!sid) await newSession();
+}
 function roleFields(proposal) {
   const split = proposal?.intent_split || proposal || {};
-  const values = {
-    target: split.target_statement || "",
-    comparator: split.comparator_statement || "",
-    outcome: split.outcome_statement || "",
-  };
+  const values = { target: split.target_statement || "", comparator: split.comparator_statement || "", outcome: split.outcome_statement || "" };
   const section = el("section", { className: "card" });
   section.append(el("h2", { textContent: "Confirm cohort statements" }));
   section.append(el("p", { textContent: "These are suggestions only. Edit every statement that needs revision, then explicitly confirm them." }));
@@ -57,24 +72,29 @@ function roleFields(proposal) {
     try { render(await request(`/sessions/${sid}/roles`, { statements })); notice("Cohort statements confirmed."); }
     catch (error) { notice(error.message, true); }
   };
-  section.append(button); return section;
+  const revise = el("button", { className: "secondary", textContent: "Revise study question" });
+  revise.onclick = () => { document.querySelector("#intent").focus(); document.querySelector("#intent").scrollIntoView({ behavior: "smooth", block: "center" }); notice("Edit the study question, then find existing phenotypes again. This will replace the proposed statements."); };
+  const ask = el("button", { className: "secondary", textContent: "Ask about these suggestions" });
+  ask.onclick = openGuidance;
+  section.append(button, revise, ask); return section;
+}
+async function beginRoleMakeComputable(state, role) {
+  try {
+    await ensureSession();
+    setActiveTab("computable");
+    const narrative = state.confirmed_role_statements[role];
+    notice(`Starting the clarification checklist for a new ${role} phenotype…`);
+    render(await request(`/sessions/${sid}/make-computable`, { narrative, role }));
+    notice(`ACP returned the clarification checklist for the new ${role} phenotype.`);
+  } catch (error) { notice(error.message, true); }
 }
 function recommendations(state) {
   const section = el("section", { className: "card" });
   section.append(el("h2", { textContent: "Find an existing phenotype" }));
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
-    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : "ACP returned no displayable recommendations for " + role + "; expand Session details for the raw response."); } catch (error) { notice(error.message, true); } };
-    const create = el("button", { textContent: "No — create a new " + role + " phenotype" });
-    create.onclick = async () => {
-      try {
-        const narrative = state.confirmed_role_statements[role];
-        notice("Starting the clarification checklist for a new " + role + " phenotype…");
-        render(await request(`/sessions/${sid}/make-computable`, { narrative, role }));
-        notice("ACP returned the clarification checklist for the new " + role + " phenotype.");
-      } catch (error) { notice(error.message, true); }
-    };
-    section.append(button, create);
+    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : `ACP found no direct ${role} match. You can create a new ${role} phenotype instead.`); } catch (error) { notice(error.message, true); } };
+    section.append(button);
   }
   const active = state.active_role;
   const result = state.recommendation_results?.[active];
@@ -88,8 +108,14 @@ function recommendations(state) {
       candidateBox.append(el("code", { textContent: candidate.phenotype_id || candidate.source_id || "Source identifier unavailable" }));
       const select = el("button", { textContent: "Select this phenotype" });
       select.onclick = async () => { try { render(await request(`/sessions/${sid}/select`, { role: active, phenotype: candidate })); notice("Phenotype selected; its source identity was preserved."); } catch (error) { notice(error.message, true); } };
-      candidateBox.append(select); section.append(candidateBox);
+      const create = el("button", { className: "secondary", textContent: `No — create a new ${active} phenotype` });
+      create.onclick = () => beginRoleMakeComputable(state, active);
+      candidateBox.append(select, create); section.append(candidateBox);
     }
+  } else if (result && active) {
+    const create = el("button", { textContent: `Create a new ${active} phenotype` });
+    create.onclick = () => beginRoleMakeComputable(state, active);
+    section.append(el("p", { textContent: `No direct existing ${active} phenotype was returned for this statement.` }), create);
   }
   return section;
 }
@@ -127,11 +153,12 @@ function optionSelect(id, label, choices, value = "") {
   input.append(el("option", { value: "", textContent: `Choose ${label.toLowerCase()}…` }));
   for (const [choiceValue, choiceLabel] of choices) input.append(el("option", { value: choiceValue, textContent: choiceLabel }));
   input.value = value || "";
-  return el("label", { textContent: label }, [input]);
+  return { input, label: el("label", { textContent: label }, [input]) };
 }
 function scopeDraftControls(draftResponse) {
   const draft = draftResponse?.scope_draft || {};
   const wrap = el("div", { className: "scope" });
+  const errorBox = el("p", { id: "scope-form-error", className: "form-error", role: "alert" });
   wrap.append(el("h3", { textContent: "Step 2: Review and confirm the phenotype scope" }));
   wrap.append(el("p", { textContent: "These are advisory starting values. Review every decision below; submitting the form is the explicit scope confirmation." }));
   if (draft.rationale) wrap.append(el("p", { textContent: draft.rationale }));
@@ -141,30 +168,27 @@ function scopeDraftControls(draftResponse) {
   if (warnings.length) wrap.append(el("ul", {}, warnings.map(warning => el("li", { textContent: warning }))));
   const indexEvent = el("input", { id: "scope-index-event", value: draft.index_event || "", placeholder: "Plain-language index event" });
   const priorObservation = el("input", { id: "scope-prior-observation", type: "number", min: "0", value: draft.prior_observation_days ?? "", placeholder: "Days" });
-  wrap.append(
-    el("label", { textContent: "Plain-language index event" }, [indexEvent]),
-    optionSelect("scope-domain", "OMOP event domain", [["Condition", "Condition"], ["Drug", "Drug"], ["Procedure", "Procedure"], ["Measurement", "Measurement"], ["Observation", "Observation"], ["Visit", "Visit"], ["Device", "Device"]], draft.domain),
-    optionSelect("scope-entry-limit", "Entry limit", [["First", "First qualifying event"], ["All", "All qualifying events"]], draft.entry_limit),
-    el("label", { textContent: "Required prior observation (days)" }, [priorObservation]),
-    optionSelect("scope-index-boundary", "Index-day boundary", [["included", "Include the index day"], ["excluded", "Exclude the index day"]]),
-    optionSelect("scope-windows", "Additional temporal windows", [["none", "No additional temporal windows"]], "none"),
-    optionSelect("scope-exit", "Cohort exit rule", [["observation", "End of observation"], ["end_of_observation", "End of observation"]], draft.exit_strategy),
-    optionSelect("scope-visit-overlap", "Visit-overlap requirement", [["false", "No visit-overlap requirement"], ["true", "Require overlap with a visit"]])
-  );
+  const domain = optionSelect("scope-domain", "OMOP event domain", [["Condition", "Condition"], ["Drug", "Drug"], ["Procedure", "Procedure"], ["Measurement", "Measurement"], ["Observation", "Observation"], ["Visit", "Visit"], ["Device", "Device"]], draft.domain);
+  const entryLimit = optionSelect("scope-entry-limit", "Entry limit", [["First", "First qualifying event"], ["All", "All qualifying events"]], draft.entry_limit);
+  const boundary = optionSelect("scope-index-boundary", "Index-day boundary", [["included", "Include the index day"], ["excluded", "Exclude the index day"]]);
+  const windows = optionSelect("scope-windows", "Additional temporal windows", [["none", "No additional temporal windows"]], "none");
+  const exit = optionSelect("scope-exit", "Cohort exit rule", [["observation", "End of observation"], ["end_of_observation", "End of observation"]], draft.exit_strategy);
+  const visitOverlap = optionSelect("scope-visit-overlap", "Visit-overlap requirement", [["false", "No visit-overlap requirement"], ["true", "Require overlap with a visit"]]);
+  const fields = [indexEvent, domain.input, entryLimit.input, priorObservation, boundary.input, windows.input, exit.input, visitOverlap.input];
+  wrap.append(el("label", { textContent: "Plain-language index event" }, [indexEvent]), domain.label, entryLimit.label, el("label", { textContent: "Required prior observation (days)" }, [priorObservation]), boundary.label, windows.label, exit.label, visitOverlap.label, errorBox);
   const confirm = el("button", { textContent: "Confirm this exact scope and retrieve candidates" });
   confirm.onclick = async () => {
-    const event = indexEvent.value.trim();
-    const domain = document.querySelector("#scope-domain").value;
-    const entryLimit = document.querySelector("#scope-entry-limit").value;
-    const prior = priorObservation.value;
-    const boundary = document.querySelector("#scope-index-boundary").value;
-    const windows = document.querySelector("#scope-windows").value;
-    const exit = document.querySelector("#scope-exit").value;
-    const visitOverlap = document.querySelector("#scope-visit-overlap").value;
-    if (!event || !domain || !entryLimit || prior === "" || !boundary || !windows || !exit || !visitOverlap) {
+    const missing = fields.filter(input => input.value === "" || input.value === null);
+    for (const input of fields) { input.classList.remove("invalid"); input.removeAttribute("aria-invalid"); }
+    if (missing.length) {
+      for (const input of missing) { input.classList.add("invalid"); input.setAttribute("aria-invalid", "true"); }
+      errorBox.textContent = "Complete the highlighted scope decisions before confirming.";
+      missing[0].focus(); missing[0].scrollIntoView({ behavior: "smooth", block: "center" });
       notice("Complete every scope decision before confirming it.", true); return;
     }
-    const scope = { index_event: event, criterion_domains: { [event]: domain }, entry_limit: entryLimit, prior_observation: Number(prior), index_day_boundary: boundary, windows, exit_strategy: exit, era_days: 0, visit_overlap: visitOverlap === "true" };
+    errorBox.textContent = "";
+    const event = indexEvent.value.trim();
+    const scope = { index_event: event, criterion_domains: { [event]: domain.input.value }, entry_limit: entryLimit.input.value, prior_observation: Number(priorObservation.value), index_day_boundary: boundary.input.value, windows: windows.input.value, exit_strategy: exit.input.value, era_days: 0, visit_overlap: visitOverlap.input.value === "true" };
     if (draft.vocabulary_restriction) scope.criterion_vocabularies = { [event]: [draft.vocabulary_restriction] };
     try { render(await request(`/sessions/${sid}/scope`, { scope, candidate_limit: 20 })); notice("Scope submitted as an explicit confirmation."); }
     catch (error) { notice(`Scope was not submitted: ${error.message}`, true); }
@@ -179,7 +203,7 @@ function computableWorkflow(state) {
   section.append(el("p", { textContent: "Use this when no existing phenotype is suitable. It begins with a reviewable scope checklist; it does not create artifacts until later concept-policy approval." }));
   const narrative = el("textarea", { id: "narrative", value: state.make_computable?.narrative || "", placeholder: "Describe the phenotype in plain clinical language." });
   const clarify = el("button", { textContent: "Start scope checklist" });
-  clarify.onclick = async () => { try { notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
+  clarify.onclick = async () => { try { await ensureSession(); setActiveTab("computable"); notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
   section.append(narrative, clarify);
   const draft = state.make_computable?.clarification;
   if (draft && state.current_stage === "scope") section.append(scopeDraftControls(draft));
@@ -189,16 +213,21 @@ function computableWorkflow(state) {
 function reviewControls(state) {
   const wrap = el("div", { className: "review" });
   wrap.append(el("h3", { textContent: "Concept-policy review" }));
-  wrap.append(el("p", { textContent: "Download the frozen review package, mark only review_* CSV columns, then upload it. Approval is required before artifact generation." }));
+  wrap.append(el("p", { textContent: "Freeze the candidate package, download and mark only review_* CSV columns, then upload it. Approval is required before artifact generation." }));
   const freeze = el("button", { textContent: "Freeze review CSV and manifest" });
   freeze.onclick = async () => { try { render(await request(`/sessions/${sid}/review/freeze`, {})); notice("Frozen review package saved in this private session."); } catch (error) { notice(error.message, true); } };
-  const upload = el("input", { type: "file", accept: ".csv" });
-  upload.onchange = async () => {
-    if (!upload.files?.[0]) return;
-    const data = new FormData(); data.append("file", upload.files[0]);
-    try { render(await request(`/sessions/${sid}/review/upload`, data)); notice("CSV policy validated. Review the exact digest below."); } catch (error) { notice(error.message, true); }
-  };
-  wrap.append(freeze, upload);
+  wrap.append(freeze);
+  const refs = state.review_artifact_references || {};
+  if (refs.csv && refs.manifest) {
+    wrap.append(el("p", { textContent: "Frozen package ready:" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${refs.csv}`, textContent: "Download frozen review CSV" }), el("a", { href: `${api}/sessions/${sid}/artifacts/${refs.manifest}`, textContent: "Download review manifest" }));
+    const upload = el("input", { type: "file", accept: ".csv" });
+    upload.onchange = async () => {
+      if (!upload.files?.[0]) return;
+      const data = new FormData(); data.append("file", upload.files[0]);
+      try { render(await request(`/sessions/${sid}/review/upload`, data)); notice("CSV policy validated. Review the exact digest below."); } catch (error) { notice(error.message, true); }
+    };
+    wrap.append(el("label", { textContent: "Upload reviewed CSV" }, [upload]));
+  }
   const policy = state.exact_concept_policy;
   if (policy?.policy_sha256) {
     wrap.append(el("pre", { textContent: json(policy) }));
@@ -224,19 +253,33 @@ function artifacts(state) {
   return section;
 }
 function render(state) {
-  const content = document.querySelector("#workflow"); clear(content);
+  const existing = document.querySelector("#existing-pane");
+  const computable = document.querySelector("#computable-pane");
+  clear(existing); clear(computable);
   document.querySelector("#stage").textContent = state.current_stage || "Start with a research question";
-  if (state.intent_proposal && !Object.keys(state.confirmed_role_statements || {}).length) content.append(roleFields(state.intent_proposal));
-  if (Object.keys(state.confirmed_role_statements || {}).length) content.append(recommendations(state));
-  const selected = selectedPhenotypes(state); if (selected) content.append(selected);
-  content.append(computableWorkflow(state));
-  const output = artifacts(state); if (output) content.append(output);
-  content.append(el("details", {}, [el("summary", { textContent: "Session details" }), el("pre", { textContent: json(state) })]));
+  document.querySelector("#getting-started").hidden = Boolean(state.study_intent);
+  if (state.intent_proposal && !Object.keys(state.confirmed_role_statements || {}).length) existing.append(roleFields(state.intent_proposal));
+  if (Object.keys(state.confirmed_role_statements || {}).length) existing.append(recommendations(state));
+  const selected = selectedPhenotypes(state); if (selected) existing.append(selected);
+  computable.append(computableWorkflow(state));
+  const output = artifacts(state); if (output) computable.append(output);
+  computable.append(el("details", {}, [el("summary", { textContent: "Session details" }), el("pre", { textContent: json(state) })]));
+  setActiveTab(activeTab);
 }
-async function newSession() { const state = await request("/sessions", {}); sid = state.session_id; sessionStorage.setItem("studyChatSession", sid); document.querySelector("#new").hidden = false; document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } })); render(state); notice("New private session created."); }
+async function newSession() {
+  const state = await request("/sessions", {});
+  sid = state.session_id; sessionStorage.setItem("studyChatSession", sid);
+  document.querySelector("#new").hidden = false;
+  document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } }));
+  render(state); notice("New private session created.");
+}
 document.querySelector("#new").onclick = () => newSession().catch(error => notice(error.message, true));
 document.querySelector("#start").onclick = async () => {
-  try { if (!sid) await newSession(); render(await request(`/sessions/${sid}/intent`, { study_intent: document.querySelector("#intent").value.trim(), workflow_type: "comparative" })); }
+  try { if (!sid) await newSession(); setActiveTab("recommend"); render(await request(`/sessions/${sid}/intent`, { study_intent: document.querySelector("#intent").value.trim(), workflow_type: "comparative" })); }
   catch (error) { notice(error.message, true); }
 };
+for (const button of document.querySelectorAll("[data-workflow-tab]")) {
+  button.onclick = async () => { try { if (button.dataset.workflowTab === "computable") await ensureSession(); setActiveTab(button.dataset.workflowTab); } catch (error) { notice(error.message, true); } };
+}
 if (sid) { document.querySelector("#new").hidden = false; fetch(`${api}/sessions/${sid}`).then(r => r.ok ? r.json() : newSession()).then(render).catch(() => newSession()); }
+else render({ current_stage: "intent", generated_artifact_references: {} });

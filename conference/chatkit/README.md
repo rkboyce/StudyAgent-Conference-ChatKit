@@ -24,6 +24,13 @@ Selecting an existing phenotype records the participant's choice but does not im
 
 The collapsible ChatKit panel is guidance-only. For substantive questions it calls the ACP `workflow_context_dialogue` flow with the session's active stage and confirmed state, then explains that grounded response. It has no tool that can select a phenotype, confirm scope, approve a concept policy, emit artifacts, or modify Atlas. The deterministic browser controls remain the sole workflow authority.
 
+
+## Demonstration interface
+
+The browser presents two workflow tabs: **Find existing phenotypes** and **Create computable phenotype**. A participant can move between them without changing any confirmed workflow state. Role statements remain editable before confirmation; the interface also offers an explicit return to the original study question and a guidance-panel shortcut. Candidate cards pair selection with the role-specific path to create a new phenotype.
+
+The ChatKit panel is collapsed initially and uses a compact 300px conversation area. A participant can explicitly expand it to 560px; messages within the chat surface scroll at that bounded size. Application operation messages remain in a fixed bottom tray, and incomplete scope fields are highlighted, focused, and described inline. Freezing a concept-review session exposes both the private frozen CSV and manifest for download before a reviewed CSV can be uploaded.
+
 ## Revision semantics
 
 Confirming revised cohort statements invalidates all downstream selections, scope, frozen-review references, exact policies, approvals, and currently presented artifact references. Selecting a different phenotype for one role or starting a new make-computable narrative preserves selections for other roles, but invalidates the dependent scope/review/approval chain. Existing private files are not deleted by a revision; they are simply no longer presented as current artifacts. Expired controller sessions also remove their associated ChatKit threads and attachments when expiry cleanup next runs.
