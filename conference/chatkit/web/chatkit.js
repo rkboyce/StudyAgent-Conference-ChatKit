@@ -14,7 +14,7 @@ async function mountChatKit(sessionId) {
     message("Conversational guidance is not enabled for this deployment. The review-gated workflow controls below remain available.");
     return;
   }
-  await customElements.whenDefined("openai-chatkit");
+  await Promise.race([customElements.whenDefined("openai-chatkit"), new Promise((_, reject) => setTimeout(() => reject(new Error("chatkit_load_timeout")), 5000))]);
   const host = document.querySelector("#chatkit");
   if (!host) return;
   host.replaceChildren();
@@ -31,8 +31,8 @@ async function mountChatKit(sessionId) {
     },
     theme: "light",
   });
-  chatkit.addEventListener("chatkit.error", () => message("Conversational guidance is temporarily unavailable. Your deterministic workflow state is unchanged."));
-  host.append(chatkit);
+  chatkit.addEventListener("chatkit.error", () => { host.replaceChildren(); host.classList.remove("ready"); message("Conversational guidance is temporarily unavailable. Your deterministic workflow state is unchanged."); });
+  host.append(chatkit); host.classList.add("ready");
   mountedSession = sessionId;
   message("Ask questions here; approvals and other workflow decisions remain in the controls below.");
 }

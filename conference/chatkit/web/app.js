@@ -52,7 +52,7 @@ function recommendations(state) {
   section.append(el("h2", { textContent: "Find an existing phenotype" }));
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
-    button.onclick = async () => { try { render(await request(`/sessions/${sid}/recommendations/${encodeURIComponent(role)}`)); } catch (error) { notice(error.message, true); } };
+    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = next.recommendation_results?.[role]?.phenotype_recommendations || next.recommendation_results?.[role]?.recommendations || next.recommendation_results?.[role]?.result?.phenotype_recommendations || []; render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : "ACP returned no displayable recommendations for " + role + "; expand Session details for the raw response."); } catch (error) { notice(error.message, true); } };
     section.append(button);
   }
   const active = state.active_role;
