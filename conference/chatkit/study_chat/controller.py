@@ -86,8 +86,13 @@ class Controller:
         if circe is not None:
             root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True); (root/"circe.json").write_text(circe if isinstance(circe,str) else json.dumps(circe,indent=2)); s["generated_artifact_references"]["selected_circe"]="circe.json"
         return self._save(s)
-    async def request_scope(self,sid: str, narrative: str):
-        s=self.state(sid); result=await self.acp.post("phenotype_make_computable",{"narrative_statement":narrative,"confirmed_scope":False,"scope_draft":True,"concept_review_mode":"required","candidate_limit":20,"concept_sets":[]}); s["make_computable"]={"narrative":narrative,"clarification":result}; s["current_stage"]="scope"; return self._save(s)
+    async def request_scope(self,sid: str,narrative: str,role: str=""):
+        s=self.state(sid)
+        if role:
+            if role not in s.get("confirmed_role_statements",{}): raise WorkflowError("unknown_role")
+            s["active_role"]=role
+        result=await self.acp.post("phenotype_make_computable",{"narrative_statement":narrative,"confirmed_scope":False,"scope_draft":True,"concept_review_mode":"required","candidate_limit":20,"concept_sets":[]})
+        s["make_computable"]={"narrative":narrative,"clarification":result}; s["current_stage"]="scope"; return self._save(s)
     async def confirm_scope(self,sid: str, scope: dict[str,Any], candidate_limit=20):
         s=self.state(sid); narrative=s.get("make_computable",{}).get("narrative")
         if not narrative: raise WorkflowError("narrative_required")

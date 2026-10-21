@@ -48,7 +48,9 @@ def test_make_computable_requires_exact_policy_approval_before_emission(tmp_path
     c = controller(tmp_path)
     state = c.create()
     sid = state["session_id"]
-    state = asyncio.run(c.request_scope(sid, "Acute kidney injury"))
+    c.confirm_roles(sid, {"target": "Naproxen exposure", "outcome": "Acute kidney injury"})
+    state = asyncio.run(c.request_scope(sid, "Acute kidney injury", "outcome"))
+    assert state["active_role"] == "outcome"
     assert state["confirmed_scope"] is None
     scope = {"index_event": "Acute kidney injury", "criterion_domains": {"Acute kidney injury": "Condition"}, "entry_limit": "First", "prior_observation": 365, "index_day_boundary": "included", "windows": "none", "exit_strategy": "observation"}
     state = asyncio.run(c.confirm_scope(sid, scope))

@@ -48,7 +48,7 @@ async def recommend(sid:str,role:str): return await controller.recommend(sid,rol
 @app.post("/api/sessions/{sid}/select")
 async def select(sid:str,body:Select): return controller.select_phenotype(sid,body.role,body.phenotype)
 @app.post("/api/sessions/{sid}/make-computable")
-async def clarify(sid:str,body:dict): return await controller.request_scope(sid,str(body.get("narrative","")))
+async def clarify(sid:str,body:dict): return await controller.request_scope(sid,str(body.get("narrative","")),str(body.get("role", "")))
 @app.post("/api/sessions/{sid}/scope")
 async def scope(sid:str,body:Scope): return await controller.confirm_scope(sid,body.scope,body.candidate_limit)
 @app.post("/api/sessions/{sid}/review/freeze")

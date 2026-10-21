@@ -54,7 +54,16 @@ function recommendations(state) {
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
     button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : "ACP returned no displayable recommendations for " + role + "; expand Session details for the raw response."); } catch (error) { notice(error.message, true); } };
-    section.append(button);
+    const create = el("button", { textContent: "No — create a new " + role + " phenotype" });
+    create.onclick = async () => {
+      try {
+        const narrative = state.confirmed_role_statements[role];
+        notice("Starting the clarification checklist for a new " + role + " phenotype…");
+        render(await request(`/sessions/${sid}/make-computable`, { narrative, role }));
+        notice("ACP returned the clarification checklist for the new " + role + " phenotype.");
+      } catch (error) { notice(error.message, true); }
+    };
+    section.append(button, create);
   }
   const active = state.active_role;
   const result = state.recommendation_results?.[active];
