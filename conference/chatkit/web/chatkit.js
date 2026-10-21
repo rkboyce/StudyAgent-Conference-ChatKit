@@ -47,7 +47,7 @@ async function mountChatKit(sessionId) {
   chatkit.addEventListener("chatkit.error", event => { console.error("ChatKit error", event.detail?.error || event.detail); host.replaceChildren(); host.classList.remove("ready"); message("Conversational guidance is temporarily unavailable. See the browser console for its exact error; workflow state is unchanged."); });
   host.append(chatkit); host.classList.add("ready"); document.querySelector("#chatkit-expand").hidden = false; setChatExpanded(false);
   mountedSession = sessionId;
-  message("ChatKit is ready. Ask a workflow question in the conversation panel below; approvals remain in the controls above.");
+  message("This Chatkit session is connected to Study Agent contextual question answering. Ask a workflow question in the conversation panel below.");
 }
 
 document.querySelector("#chatkit-guidance")?.addEventListener("toggle", updateGuidanceSummary);

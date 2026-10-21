@@ -271,7 +271,7 @@ function computableWorkflow(state) {
 function reviewControls(state) {
   const wrap = el("div", { className: "review" });
   const review = state.make_computable?.review || {};
-  wrap.append(el("h3", { textContent: "Review and approve concept policies" }));
+  wrap.append(el("h3", { textContent: "Review and approve concept policies" }), ohdsiHelpButton());
   if (state.concept_review_id && review.review_urls?.candidates_csv && review.review_urls?.manifest) {
     wrap.append(el("p", { textContent: "Scope is confirmed. ACP returned a frozen concept-candidate review session. Next, download the package, review concept inclusion and descendant/mapped/exclusion policies, then upload the marked CSV for exact-policy approval." }));
   } else {
@@ -307,7 +307,7 @@ function reviewControls(state) {
 }
 function artifacts(state) {
   if (!state.generated_artifact_references) return null;
-  const section = el("section", { className: "card" }); section.append(el("h2", { textContent: "Artifacts" }));
+  const section = el("section", { className: "card" }); section.append(el("h2", { textContent: "Artifacts" }), ohdsiHelpButton());
   const refs = state.generated_artifact_references;
   for (const name of ["capr.R", "circe.json"]) {
     if ((name === "capr.R" && refs.capr) || (name === "circe.json" && (refs.circe || refs.selected_circe))) section.append(el("a", { href: `${api}/sessions/${sid}/artifacts/${name}`, textContent: `Download ${name}` }));
@@ -337,6 +337,7 @@ async function newSession() {
   document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } }));
   render(state); notice("New private session created.");
 }
+document.querySelector("#guidance-shortcut").onclick = event => openGuidance(event.currentTarget);
 document.querySelector("#guidance-return").onclick = () => {
   const target = guidanceReturnTarget;
   guidanceReturnTarget = null;
