@@ -48,11 +48,30 @@ class ACP:
         if response.status_code >= 500: raise WorkflowError("acp_error")
         try: return response.json()
         except ValueError as e: raise WorkflowError("acp_non_json_response") from e
-    async def get_trusted(self, relative_url: str) -> bytes:
-        url=httpx.URL(self.base + "/").join(relative_url)
-        if url.host != httpx.URL(self.base).host or url.scheme != httpx.URL(self.base).scheme: raise WorkflowError("untrusted_review_url")
-        async with httpx.AsyncClient(timeout=self.timeout) as client: response=await client.get(url)
-        response.raise_for_status(); return response.content
+    def resolve_trusted_url(self, review_url: str) -> httpx.URL:
+        """Resolve ACP review links without allowing a leading slash to drop ACP's path prefix."""
+        base = httpx.URL(self.base)
+        supplied = httpx.URL(review_url)
+        if supplied.is_absolute_url:
+            url = supplied
+        elif review_url.startswith("/"):
+            url = base.copy_with(path=base.path.rstrip("/") + supplied.path)
+            if supplied.query:
+                url = url.copy_with(query=supplied.query)
+        else:
+            url = httpx.URL(str(base) + "/").join(review_url)
+        prefix = base.path.rstrip("/")
+        if url.host != base.host or url.scheme != base.scheme or (prefix and not str(url.path).startswith(prefix + "/")):
+            raise WorkflowError("untrusted_review_url")
+        return url
+    async def get_trusted(self, review_url: str) -> bytes:
+        url = self.resolve_trusted_url(review_url)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client: response=await client.get(url)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise WorkflowError("review_package_unavailable_or_expired") from e
+        return response.content
 
 class Controller:
     def __init__(self, settings: Settings, on_expired: Callable[[list[str]], None] | None = None): self.settings=settings; self.store=Store(settings.db_path, settings.session_ttl); self.acp=ACP(settings); self.on_expired=on_expired; settings.artifact_root.mkdir(parents=True,exist_ok=True)

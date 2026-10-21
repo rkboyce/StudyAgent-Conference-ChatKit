@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from study_chat.controller import Controller, Settings, WorkflowError
+from study_chat.controller import ACP, Controller, Settings, WorkflowError
 
 
 class FakeACP:
@@ -101,3 +101,10 @@ def test_review_upload_rejects_manifest_for_another_review(tmp_path):
     (root / "manifest.json").write_text(json.dumps({"schema_version": 1, "review_id": "review-old"}))
     with pytest.raises(WorkflowError, match="review_manifest_mismatch"):
         c.ingest_review_csv(sid, b"concept_set_name,concept_id,domain,review_include_concept,review_include_descendants,review_include_mapped,review_exclude_concepts,review_exclude_descendants,review_exclude_mapped\nAKI,1,Condition,x,,,,,\n")
+
+
+def test_review_urls_keep_the_configured_acp_path_prefix(tmp_path):
+    acp = ACP(Settings("https://atlas.napdi.org/StudyAgent", tmp_path / "sessions.db", tmp_path / "artifacts"))
+    assert str(acp.resolve_trusted_url("/flows/phenotype_make_computable/reviews/a/candidates.csv")) == "https://atlas.napdi.org/StudyAgent/flows/phenotype_make_computable/reviews/a/candidates.csv"
+    with pytest.raises(WorkflowError, match="untrusted_review_url"):
+        acp.resolve_trusted_url("https://example.test/flows/phenotype_make_computable/reviews/a/candidates.csv")

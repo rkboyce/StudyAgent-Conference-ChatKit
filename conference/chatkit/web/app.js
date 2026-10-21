@@ -7,7 +7,9 @@ let pendingRequests = 0;
 function setBusy(active) {
   pendingRequests = Math.max(0, pendingRequests + (active ? 1 : -1));
   const activity = document.querySelector("#activity");
-  if (activity) activity.hidden = pendingRequests === 0;
+  const busy = pendingRequests > 0;
+  if (activity) activity.hidden = !busy;
+  document.querySelector("#processing-overlay")?.toggleAttribute("hidden", !busy);
 }
 function setActiveTab(tab) {
   activeTab = tab;
@@ -20,9 +22,18 @@ function setActiveTab(tab) {
   document.querySelector("#existing-pane")?.toggleAttribute("hidden", tab !== "recommend");
   document.querySelector("#computable-pane")?.toggleAttribute("hidden", tab !== "computable");
 }
+function highlight(element) {
+  if (!element) return;
+  element.classList.remove("focus-highlight");
+  void element.offsetWidth;
+  element.classList.add("focus-highlight");
+  setTimeout(() => element.classList.remove("focus-highlight"), 1500);
+}
 function openGuidance() {
+  const panel = document.querySelector("#chatkit-guidance");
   document.dispatchEvent(new CustomEvent("study-chat-open-guidance"));
-  document.querySelector("#chatkit-guidance")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  highlight(panel);
+  panel?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 const el = (tag, props = {}, children = []) => {
   const node = document.createElement(tag);
@@ -73,7 +84,7 @@ function roleFields(proposal) {
     catch (error) { notice(error.message, true); }
   };
   const revise = el("button", { className: "secondary", textContent: "Revise study question" });
-  revise.onclick = () => { document.querySelector("#intent").focus(); document.querySelector("#intent").scrollIntoView({ behavior: "smooth", block: "center" }); notice("Edit the study question, then find existing phenotypes again. This will replace the proposed statements."); };
+  revise.onclick = () => { const intent = document.querySelector("#intent"); intent.focus(); highlight(intent); intent.scrollIntoView({ behavior: "smooth", block: "center" }); notice("Edit the study question, then find existing phenotypes again. This will replace the proposed statements."); };
   const ask = el("button", { className: "secondary", textContent: "Ask about these suggestions" });
   ask.onclick = openGuidance;
   section.append(button, revise, ask); return section;
@@ -93,7 +104,10 @@ function recommendations(state) {
   section.append(el("h2", { textContent: "Find an existing phenotype" }));
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
-    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : `ACP found no direct ${role} match. You can create a new ${role} phenotype instead.`); } catch (error) { notice(error.message, true); } };
+    button.onclick = async () => { try {
+      const active = state.active_role;
+      if (active && active !== role && state.recommendation_results?.[active] && !window.confirm(`Show ${role} recommendations? This replaces the currently displayed ${active} recommendations.`)) return;
+      notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : `ACP found no direct ${role} match. You can create a new ${role} phenotype instead.`); } catch (error) { notice(error.message, true); } };
     section.append(button);
   }
   const active = state.active_role;
@@ -155,7 +169,7 @@ function optionSelect(id, label, choices, value = "") {
   input.value = value || "";
   return { input, label: el("label", { textContent: label }, [input]) };
 }
-function scopeDraftControls(draftResponse) {
+function scopeDraftControls(draftResponse, narrative) {
   const draft = draftResponse?.scope_draft || {};
   const wrap = el("div", { className: "scope" });
   const errorBox = el("p", { id: "scope-form-error", className: "form-error", role: "alert" });
@@ -176,6 +190,11 @@ function scopeDraftControls(draftResponse) {
   const visitOverlap = optionSelect("scope-visit-overlap", "Visit-overlap requirement", [["false", "No visit-overlap requirement"], ["true", "Require overlap with a visit"]]);
   const fields = [indexEvent, domain.input, entryLimit.input, priorObservation, boundary.input, windows.input, exit.input, visitOverlap.input];
   wrap.append(el("label", { textContent: "Plain-language index event" }, [indexEvent]), domain.label, entryLimit.label, el("label", { textContent: "Required prior observation (days)" }, [priorObservation]), boundary.label, windows.label, exit.label, visitOverlap.label, errorBox);
+  const refreshSuggestions = el("button", { className: "secondary", textContent: "Get / refresh AI scope suggestions" });
+  refreshSuggestions.onclick = async () => {
+    try { notice("Requesting advisory AI scope suggestions…"); render(await request(`/sessions/${sid}/make-computable`, { narrative })); notice("ACP returned advisory AI scope suggestions. Review each value before confirmation."); }
+    catch (error) { notice(error.message, true); }
+  };
   const confirm = el("button", { textContent: "Confirm this exact scope and retrieve candidates" });
   confirm.onclick = async () => {
     const missing = fields.filter(input => input.value === "" || input.value === null);
@@ -193,7 +212,7 @@ function scopeDraftControls(draftResponse) {
     try { render(await request(`/sessions/${sid}/scope`, { scope, candidate_limit: 20 })); notice("Scope submitted as an explicit confirmation."); }
     catch (error) { notice(`Scope was not submitted: ${error.message}`, true); }
   };
-  wrap.append(confirm);
+  wrap.append(refreshSuggestions, confirm);
   wrap.append(el("details", {}, [el("summary", { textContent: "View raw ACP advisory response" }), el("pre", { textContent: json(draftResponse) })]));
   return wrap;
 }
@@ -206,14 +225,19 @@ function computableWorkflow(state) {
   clarify.onclick = async () => { try { await ensureSession(); setActiveTab("computable"); notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
   section.append(narrative, clarify);
   const draft = state.make_computable?.clarification;
-  if (draft && state.current_stage === "scope") section.append(scopeDraftControls(draft));
+  if (draft && state.current_stage === "scope") section.append(scopeDraftControls(draft, state.make_computable?.narrative || ""));
   if (["review", "approved"].includes(state.current_stage)) section.append(reviewControls(state));
   return section;
 }
 function reviewControls(state) {
   const wrap = el("div", { className: "review" });
-  wrap.append(el("h3", { textContent: "Concept-policy review" }));
-  wrap.append(el("p", { textContent: "Freeze the candidate package, download and mark only review_* CSV columns, then upload it. Approval is required before artifact generation." }));
+  const review = state.make_computable?.review || {};
+  wrap.append(el("h3", { textContent: "Review and approve concept policies" }));
+  if (state.concept_review_id && review.review_urls?.candidates_csv && review.review_urls?.manifest) {
+    wrap.append(el("p", { textContent: "Scope is confirmed. ACP returned a frozen concept-candidate review session. Next, download the package, review concept inclusion and descendant/mapped/exclusion policies, then upload the marked CSV for exact-policy approval." }));
+  } else {
+    wrap.append(el("p", { textContent: "Scope is confirmed, but ACP did not provide a review package. Do not approve or emit artifacts. Request a new review session or inspect Session details." }));
+  }
   const freeze = el("button", { textContent: "Freeze review CSV and manifest" });
   freeze.onclick = async () => { try { render(await request(`/sessions/${sid}/review/freeze`, {})); notice("Frozen review package saved in this private session."); } catch (error) { notice(error.message, true); } };
   wrap.append(freeze);
@@ -256,7 +280,8 @@ function render(state) {
   const existing = document.querySelector("#existing-pane");
   const computable = document.querySelector("#computable-pane");
   clear(existing); clear(computable);
-  document.querySelector("#stage").textContent = state.current_stage || "Start with a research question";
+  const stage = document.querySelector("#stage");
+  if (stage) stage.textContent = state.current_stage || "Start with a research question";
   document.querySelector("#getting-started").hidden = Boolean(state.study_intent);
   if (state.intent_proposal && !Object.keys(state.confirmed_role_statements || {}).length) existing.append(roleFields(state.intent_proposal));
   if (Object.keys(state.confirmed_role_statements || {}).length) existing.append(recommendations(state));
