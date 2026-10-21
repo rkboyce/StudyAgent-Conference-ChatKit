@@ -41,6 +41,10 @@ def test_question_to_role_selection_and_recommendation_is_persisted(tmp_path):
     state = c.confirm_roles(state["session_id"], {"target": "Naproxen exposure", "comparator": "Ibuprofen exposure", "outcome": "Myocardial infarction"})
     state = asyncio.run(c.recommend(state["session_id"], "outcome"))
     assert state["recommendation_results"]["outcome"]["status"] == "ok"
+    recommendation_call = c.acp.calls[-1][1]
+    assert recommendation_call["workflow_type"] == "cohort_methods"
+    assert recommendation_call["candidate_limit"] == 5
+    assert recommendation_call["max_results"] == 5
     state = c.select_phenotype(state["session_id"], "outcome", state["recommendation_results"]["outcome"]["phenotype_recommendations"][0])
     assert state["selected_phenotypes"]["outcome"]["source_id"] == "ohdsi:44"
     assert (tmp_path / "artifacts" / state["session_id"] / "circe.json").exists()

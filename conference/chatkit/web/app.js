@@ -122,25 +122,67 @@ function selectedPhenotypes(state) {
   }
   return section;
 }
+function optionSelect(id, label, choices, value = "") {
+  const input = el("select", { id });
+  input.append(el("option", { value: "", textContent: `Choose ${label.toLowerCase()}…` }));
+  for (const [choiceValue, choiceLabel] of choices) input.append(el("option", { value: choiceValue, textContent: choiceLabel }));
+  input.value = value || "";
+  return el("label", { textContent: label }, [input]);
+}
+function scopeDraftControls(draftResponse) {
+  const draft = draftResponse?.scope_draft || {};
+  const wrap = el("div", { className: "scope" });
+  wrap.append(el("h3", { textContent: "Step 2: Review and confirm the phenotype scope" }));
+  wrap.append(el("p", { textContent: "These are advisory starting values. Review every decision below; submitting the form is the explicit scope confirmation." }));
+  if (draft.rationale) wrap.append(el("p", { textContent: draft.rationale }));
+  const questions = Array.isArray(draftResponse?.questions) ? draftResponse.questions : [];
+  if (questions.length) wrap.append(el("p", { textContent: questions.join(" ") }));
+  const warnings = Array.isArray(draft.warnings) ? draft.warnings : [];
+  if (warnings.length) wrap.append(el("ul", {}, warnings.map(warning => el("li", { textContent: warning }))));
+  const indexEvent = el("input", { id: "scope-index-event", value: draft.index_event || "", placeholder: "Plain-language index event" });
+  const priorObservation = el("input", { id: "scope-prior-observation", type: "number", min: "0", value: draft.prior_observation_days ?? "", placeholder: "Days" });
+  wrap.append(
+    el("label", { textContent: "Plain-language index event" }, [indexEvent]),
+    optionSelect("scope-domain", "OMOP event domain", [["Condition", "Condition"], ["Drug", "Drug"], ["Procedure", "Procedure"], ["Measurement", "Measurement"], ["Observation", "Observation"], ["Visit", "Visit"], ["Device", "Device"]], draft.domain),
+    optionSelect("scope-entry-limit", "Entry limit", [["First", "First qualifying event"], ["All", "All qualifying events"]], draft.entry_limit),
+    el("label", { textContent: "Required prior observation (days)" }, [priorObservation]),
+    optionSelect("scope-index-boundary", "Index-day boundary", [["included", "Include the index day"], ["excluded", "Exclude the index day"]]),
+    optionSelect("scope-windows", "Additional temporal windows", [["none", "No additional temporal windows"]], "none"),
+    optionSelect("scope-exit", "Cohort exit rule", [["observation", "End of observation"], ["end_of_observation", "End of observation"]], draft.exit_strategy),
+    optionSelect("scope-visit-overlap", "Visit-overlap requirement", [["false", "No visit-overlap requirement"], ["true", "Require overlap with a visit"]])
+  );
+  const confirm = el("button", { textContent: "Confirm this exact scope and retrieve candidates" });
+  confirm.onclick = async () => {
+    const event = indexEvent.value.trim();
+    const domain = document.querySelector("#scope-domain").value;
+    const entryLimit = document.querySelector("#scope-entry-limit").value;
+    const prior = priorObservation.value;
+    const boundary = document.querySelector("#scope-index-boundary").value;
+    const windows = document.querySelector("#scope-windows").value;
+    const exit = document.querySelector("#scope-exit").value;
+    const visitOverlap = document.querySelector("#scope-visit-overlap").value;
+    if (!event || !domain || !entryLimit || prior === "" || !boundary || !windows || !exit || !visitOverlap) {
+      notice("Complete every scope decision before confirming it.", true); return;
+    }
+    const scope = { index_event: event, criterion_domains: { [event]: domain }, entry_limit: entryLimit, prior_observation: Number(prior), index_day_boundary: boundary, windows, exit_strategy: exit, era_days: 0, visit_overlap: visitOverlap === "true" };
+    if (draft.vocabulary_restriction) scope.criterion_vocabularies = { [event]: [draft.vocabulary_restriction] };
+    try { render(await request(`/sessions/${sid}/scope`, { scope, candidate_limit: 20 })); notice("Scope submitted as an explicit confirmation."); }
+    catch (error) { notice(`Scope was not submitted: ${error.message}`, true); }
+  };
+  wrap.append(confirm);
+  wrap.append(el("details", {}, [el("summary", { textContent: "View raw ACP advisory response" }), el("pre", { textContent: json(draftResponse) })]));
+  return wrap;
+}
 function computableWorkflow(state) {
   const section = el("section", { className: "card" });
-  section.append(el("h2", { textContent: "Make a phenotype computable" }));
+  section.append(el("h2", { textContent: "Create a new computable phenotype" }));
+  section.append(el("p", { textContent: "Use this when no existing phenotype is suitable. It begins with a reviewable scope checklist; it does not create artifacts until later concept-policy approval." }));
   const narrative = el("textarea", { id: "narrative", value: state.make_computable?.narrative || "", placeholder: "Describe the phenotype in plain clinical language." });
-  const clarify = el("button", { textContent: "Request clarification checklist" });
-  clarify.onclick = async () => { try { render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); } catch (error) { notice(error.message, true); } };
+  const clarify = el("button", { textContent: "Start scope checklist" });
+  clarify.onclick = async () => { try { notice("Requesting the scope checklist…"); render(await request(`/sessions/${sid}/make-computable`, { narrative: narrative.value.trim() })); notice("ACP returned an advisory scope checklist. Review and explicitly confirm each decision."); } catch (error) { notice(error.message, true); } };
   section.append(narrative, clarify);
   const draft = state.make_computable?.clarification;
-  if (draft) {
-    section.append(el("h3", { textContent: "ACP clarification / advisory scope draft" }));
-    section.append(el("pre", { textContent: json(draft) }));
-    const scope = el("textarea", { id: "scope-json", value: json(state.confirmed_scope || draft.scope_draft || {}), placeholder: "Paste the complete, reviewed scope JSON." });
-    const confirm = el("button", { textContent: "Confirm exact scope and retrieve candidates" });
-    confirm.onclick = async () => {
-      try { render(await request(`/sessions/${sid}/scope`, { scope: JSON.parse(scope.value), candidate_limit: 20 })); notice("Scope submitted as an explicit confirmation."); }
-      catch (error) { notice(`Scope was not submitted: ${error.message}`, true); }
-    };
-    section.append(el("p", { textContent: "Review the draft first. It is not confirmed until you use the confirmation action below." }), scope, confirm);
-  }
+  if (draft && state.current_stage === "scope") section.append(scopeDraftControls(draft));
   if (["review", "approved"].includes(state.current_stage)) section.append(reviewControls(state));
   return section;
 }
@@ -191,10 +233,10 @@ function render(state) {
   const output = artifacts(state); if (output) content.append(output);
   content.append(el("details", {}, [el("summary", { textContent: "Session details" }), el("pre", { textContent: json(state) })]));
 }
-async function newSession() { const state = await request("/sessions", {}); sid = state.session_id; sessionStorage.setItem("studyChatSession", sid); document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } })); render(state); notice("New private session created."); }
+async function newSession() { const state = await request("/sessions", {}); sid = state.session_id; sessionStorage.setItem("studyChatSession", sid); document.querySelector("#new").hidden = false; document.dispatchEvent(new CustomEvent("study-chat-session", { detail: { sessionId: sid } })); render(state); notice("New private session created."); }
 document.querySelector("#new").onclick = () => newSession().catch(error => notice(error.message, true));
 document.querySelector("#start").onclick = async () => {
   try { if (!sid) await newSession(); render(await request(`/sessions/${sid}/intent`, { study_intent: document.querySelector("#intent").value.trim(), workflow_type: "comparative" })); }
   catch (error) { notice(error.message, true); }
 };
-if (sid) fetch(`${api}/sessions/${sid}`).then(r => r.ok ? r.json() : newSession()).then(render).catch(() => newSession());
+if (sid) { document.querySelector("#new").hidden = false; fetch(`${api}/sessions/${sid}`).then(r => r.ok ? r.json() : newSession()).then(render).catch(() => newSession()); }

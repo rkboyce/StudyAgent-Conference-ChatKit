@@ -15,6 +15,8 @@ This independently deployable FastAPI application places a review-gated browser 
 
 The controller vendors the deterministic policy rules from AgentPlayGround's `phenotype_review_csv_to_concept_sets.py` and its Atlas concept-set normalization rules. It intentionally rejects a full Circe cohort definition as an Atlas concept-set import. Current ACP accepts 1–500 candidates for deterministic `required` review; LLM `propose` is separately limited to 100. This app uses only `required` review. The prepared conference ACP also supports `scope_draft: true`; this app treats its result as advisory clarification and never promotes it to confirmed scope.
 
+The browser uses `comparative` as its participant-facing study label, but maps it to ACP's established `cohort_methods` value for recommendation and existing-definition requests. This preserves the ACP direct-match gate used by the R cohort-methods shell; it prevents unrelated medication candidates from being presented as fallback recommendations when no direct target or comparator match exists.
+
 
 ## Selection and contextual guidance
 

@@ -100,10 +100,15 @@ class Controller:
         s=self.state(sid); self._invalidate_downstream(s)
         s["confirmed_role_statements"]=statements; s["active_role"]=next(iter(statements)); s["current_stage"]="recommendations"
         return self._save(s)
+    @staticmethod
+    def _acp_workflow_type(workflow_type: str) -> str:
+        """Map concise browser labels to the ACP flow's established vocabulary."""
+        return {"comparative": "cohort_methods", "incidence": "incidence"}.get(workflow_type, workflow_type)
+
     async def recommend(self,sid: str, role: str, offset=0):
         s=self.state(sid); statement=s["confirmed_role_statements"].get(role)
         if not statement: raise WorkflowError("unknown_role")
-        result=await self.acp.post("phenotype_recommendation",{"study_intent":statement,"recommendation_role":role,"workflow_type":s["workflow_type"],"top_k":20,"max_results":10,"candidate_offset":offset})
+        result=await self.acp.post("phenotype_recommendation",{"study_intent":statement,"recommendation_role":role,"workflow_type":self._acp_workflow_type(s["workflow_type"]),"top_k":20,"max_results":5,"candidate_limit":5,"candidate_offset":offset})
         s["recommendation_results"][role]=result; s["active_role"]=role
         return self._save(s)
     def select_phenotype(self,sid: str, role: str, phenotype: dict[str,Any]):
@@ -121,7 +126,7 @@ class Controller:
     async def retrieve_selected_definition(self,sid: str,role: str):
         s=self.state(sid); selected=s.get("selected_phenotypes",{}).get(role)
         if not selected: raise WorkflowError("selected_phenotype_required")
-        result=await self.acp.post("phenotype_definition",{"phenotype_id":selected["source_id"],"allow_make_computable":False,"recommendation_context":{"recommendation_role":role,"workflow_type":s.get("workflow_type","")}})
+        result=await self.acp.post("phenotype_definition",{"phenotype_id":selected["source_id"],"allow_make_computable":False,"recommendation_context":{"recommendation_role":role,"workflow_type":self._acp_workflow_type(s.get("workflow_type", ""))}})
         selected["definition_result"]=result
         if result.get("status")=="ok" and result.get("circe_json") is not None:
             root=self.settings.artifact_root/sid; root.mkdir(mode=0o700,exist_ok=True)
