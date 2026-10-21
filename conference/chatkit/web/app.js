@@ -10,6 +10,7 @@ const el = (tag, props = {}, children = []) => {
 };
 const clear = node => node.replaceChildren();
 const json = value => JSON.stringify(value ?? {}, null, 2);
+const recommendationRows = result => result?.phenotype_recommendations || result?.recommendations?.phenotype_recommendations || result?.result?.phenotype_recommendations || [];
 async function request(path, body, options = {}) {
   const response = await fetch(`${api}${path}`, {
     method: options.method || "POST",
@@ -52,12 +53,12 @@ function recommendations(state) {
   section.append(el("h2", { textContent: "Find an existing phenotype" }));
   for (const role of Object.keys(state.confirmed_role_statements || {})) {
     const button = el("button", { textContent: `Recommendations for ${role}` });
-    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = next.recommendation_results?.[role]?.phenotype_recommendations || next.recommendation_results?.[role]?.recommendations || next.recommendation_results?.[role]?.result?.phenotype_recommendations || []; render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : "ACP returned no displayable recommendations for " + role + "; expand Session details for the raw response."); } catch (error) { notice(error.message, true); } };
+    button.onclick = async () => { try { notice("Requesting recommendations for " + role + "…"); const next = await request("/sessions/" + sid + "/recommendations/" + encodeURIComponent(role)); const found = recommendationRows(next.recommendation_results?.[role]); render(next); notice(found.length ? "Retrieved " + found.length + " recommendation(s) for " + role + "." : "ACP returned no displayable recommendations for " + role + "; expand Session details for the raw response."); } catch (error) { notice(error.message, true); } };
     section.append(button);
   }
   const active = state.active_role;
   const result = state.recommendation_results?.[active];
-  const rows = result?.phenotype_recommendations || result?.recommendations || result?.result?.phenotype_recommendations || [];
+  const rows = recommendationRows(result);
   if (rows.length) {
     section.append(el("h3", { textContent: `Recommendations for ${active}` }));
     for (const candidate of rows) {
