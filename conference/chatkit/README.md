@@ -25,7 +25,7 @@ set -a; . ./.env; set +a
 uv run uvicorn study_chat.app:app --host 127.0.0.1 --port 8795 --root-path "$APP_BASE_PATH"
 ```
 
-Open `http://127.0.0.1:8795/study-chat/`. The deterministic browser controls are available immediately. The self-hosted ChatKit backend is exposed at `POST /study-chat/chatkit`; it requires the opaque `X-Study-Session` header and persists threads in the same private SQLite service store. When `CHATKIT_DOMAIN_KEY` is configured, the browser embeds the ChatKit web component and sends only its opaque session ID to this backend; without that setting, the deterministic controls remain usable and no model call is made. OpenAI recommends a self-hosted ChatKit server plus Agents SDK with a durable Store and server-side context for new work. See [advanced ChatKit documentation](https://developers.openai.com/api/docs/guides/custom-chatkit).
+Open `http://127.0.0.1:8795/study-chat/`. The deterministic browser controls are available immediately. The self-hosted ChatKit backend is exposed at `POST /study-chat/chatkit`; it requires the opaque `X-Study-Session` header and persists threads in the same private SQLite service store. The browser sends only this opaque session ID to the backend. The current custom-backend integration uses `apiURL` and a custom `fetch` hook; it does not need a `CHATKIT_DOMAIN_KEY`. OpenAI recommends a self-hosted ChatKit server plus Agents SDK with a durable Store and server-side context for new work. See [advanced ChatKit documentation](https://developers.openai.com/api/docs/guides/custom-chatkit).
 
 ## Deployment
 

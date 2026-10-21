@@ -9,25 +9,17 @@ function message(text) {
 
 async function mountChatKit(sessionId) {
   if (!sessionId || mountedSession === sessionId) return;
-  const config = await fetch(`${api}/config`).then(response => response.ok ? response.json() : {});
-  if (!config.chatkit_domain_key) {
-    message("Conversational guidance is not enabled for this deployment. The review-gated workflow controls below remain available.");
-    return;
-  }
   await Promise.race([customElements.whenDefined("openai-chatkit"), new Promise((_, reject) => setTimeout(() => reject(new Error("chatkit_load_timeout")), 5000))]);
   const host = document.querySelector("#chatkit");
   if (!host) return;
   host.replaceChildren();
   const chatkit = document.createElement("openai-chatkit");
   chatkit.setOptions({
-    api: {
-      url: `${base.replace(/\/$/, "")}/chatkit`,
-      domainKey: config.chatkit_domain_key,
-      fetch: (input, init = {}) => {
-        const headers = new Headers(init.headers || {});
-        headers.set("X-Study-Session", sessionId);
-        return fetch(input, { ...init, headers });
-      },
+    apiURL: `${base.replace(/\/$/, "")}/chatkit`,
+    fetch: (input, init = {}) => {
+      const headers = new Headers(init.headers || {});
+      headers.set("X-Study-Session", sessionId);
+      return fetch(input, { ...init, headers });
     },
     theme: "light",
   });

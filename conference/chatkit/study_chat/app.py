@@ -25,8 +25,6 @@ class Approval(BaseModel): digest:str
 class Atlas(BaseModel): payload:dict; name:str=""; domain:str=""
 @app.get("/",response_class=HTMLResponse)
 async def index(): return (ROOT/"web/index.html").read_text()
-@app.get("/api/config")
-async def config(): return {"chatkit_domain_key":os.getenv("CHATKIT_DOMAIN_KEY","")}
 @app.post("/chatkit")
 async def chatkit(request: Request):
     session_id=request.headers.get("X-Study-Session","")
